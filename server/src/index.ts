@@ -73,6 +73,7 @@ export function createServer(): McpServer {
     "providers_status",
     {
       title: "Provider health",
+      annotations: { readOnlyHint: true, openWorldHint: false },
       description: "Health check for each provider: binary in PATH, --version, authentication and circuit-breaker state.",
       inputSchema: {},
     },
@@ -91,6 +92,7 @@ export function createServer(): McpServer {
     "providers_config",
     {
       title: "Effective configuration",
+      annotations: { readOnlyHint: true, openWorldHint: false },
       description: "Show the effective merged configuration (defaults <- project .claude/multiprovider.json <- ~/.claude/multiprovider.json).",
       inputSchema: {},
     },
@@ -233,6 +235,7 @@ export function createServer(): McpServer {
     "sdd_feature_status",
     {
       title: "Spec-driven pipeline status",
+      annotations: { readOnlyHint: true, openWorldHint: false },
       description:
         "Read-only. Without slug: every feature under specs/ with its stage (Spec → Plan → Tasks → Implementación → Verificación → Cerrada), task progress, warning count and next step. With slug: that feature in full (Status of each artifact, open tasks and owners, last verification report, warnings, next step). Never writes anything; the next step is a suggestion.",
       inputSchema: { slug: z.string().min(1).optional().describe("Feature slug: the folder under specs/; omit for every feature") },

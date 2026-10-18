@@ -1,5 +1,12 @@
 {
   "enabledPlugins": {
     "multi-provider@claude-conductor": true
+  },
+  "permissions": {
+    "allow": [
+      "mcp__plugin_multi-provider_multi-provider__sdd_feature_status",
+      "mcp__plugin_multi-provider_multi-provider__providers_status",
+      "mcp__plugin_multi-provider_multi-provider__providers_config"
+    ]
   }
 }
