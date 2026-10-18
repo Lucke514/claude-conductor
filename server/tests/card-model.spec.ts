@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bar, buildCard, fmtClock, fmtDuration, fmtTokens, outcomeOf, parseVerdict, providerView, sparkline } from "../../hooks/conductor/model.js";
+import { bar, buildCard, ctxBar, fmtClock, fmtCost, fmtDuration, fmtTokens, outcomeOf, parseTasks, parseVerdict, pickActiveSpec, providerView, sparkline, specProgress } from "../../hooks/conductor/model.js";
 
 const NOW = Date.parse("2026-10-18T12:00:00Z");
 const TODAY = "2026-10-18";
@@ -95,4 +95,53 @@ describe("conductor card model", () => {
     expect(parseVerdict("VERDICT: ACCEPT | REQUEST_CHANGES | DISCARD")).toEqual({ verdict: "ACCEPT" });
     expect(parseVerdict("no verdict here")).toBeUndefined();
   });
+
+  const TASKS = [
+    "> Status: approved",
+    "## T1 — Parse",
+    "- [x] Done",
+    "- **Owner**: —",
+    "## T2 [P] — Gate",
+    "- [ ] Done",
+    "- **Owner**: codex (multi-provider) since 2026-10-18",
+    "## T3 [P] — Docs",
+    "- [ ] Done",
+    "- **Owner**: —",
+    "## G1 — Fix gap",
+    "- [~] Waived — 2026-10-18, not worth it",
+    "- **Owner**: —",
+  ].join("\n");
+
+  it("parses spec-driven tasks: ids, boxes and owners", () => {
+    const { status, tasks } = parseTasks(TASKS);
+    expect(status).toBe("approved");
+    expect(tasks.map((t) => `${t.id}${t.box}`)).toEqual(["T1x", "T2 ", "T3 ", "G1~"]);
+    expect(tasks[1]?.owner).toBe("codex (multi-provider) since 2026-10-18");
+  });
+
+  it("reports progress with the claimed task first, waived counting as closed", () => {
+    const p = specProgress("demo", TASKS);
+    expect(p).toMatchObject({ slug: "demo", status: "approved", done: 2, total: 4 });
+    expect(p.current).toMatchObject({ id: "T2", state: "en curso" });
+    const unclaimed = specProgress("demo", TASKS.replace("codex (multi-provider) since 2026-10-18", "—"));
+    expect(unclaimed.current).toMatchObject({ id: "T2", state: "siguiente" });
+  });
+
+  it("picks the active spec: claimed work first, then approved with open tasks", () => {
+    const draft = specProgress("a", TASKS.replace("approved", "draft").replace("codex (multi-provider) since 2026-10-18", "—"));
+    const ready = specProgress("b", TASKS.replace("codex (multi-provider) since 2026-10-18", "—"));
+    const busy = specProgress("c", TASKS);
+    expect(pickActiveSpec([draft, ready, busy])?.slug).toBe("c");
+    expect(pickActiveSpec([draft, ready])?.slug).toBe("b");
+    expect(pickActiveSpec([draft])).toBeUndefined();
+  });
+
+  it("formats the session header figures", () => {
+    expect(ctxBar(42)).toBe("━━━━──────");
+    expect(ctxBar(undefined)).toBe("──────────");
+    expect(ctxBar(130, 4)).toBe("━━━━");
+    expect(fmtCost(0.5)).toBe("$0.50");
+    expect(fmtCost(undefined)).toBe("");
+  });
 });
+
