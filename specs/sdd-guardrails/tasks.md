@@ -130,3 +130,40 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 ---
 
 ## Verification reports
+
+### Verification report — sdd-guardrails — 2026-10-18 — pass 1
+
+Change set: `e4c44fe` (`main@30f6cb7...HEAD`)
+Converged: no — pipeline gates pending (step 4)
+
+| Req | Verdict | Evidence (case · assertion · clause) |
+|---|---|---|
+| R1 | met | `hooks-setup.spec.ts::"auto-delegation points implementation work at /sdd-delegate"` — asserts the context is `AUTO_DELEGATE_CONTEXT` + `SDD_AUTO_CONTEXT`, naming `/sdd-delegate` and forbidding write `delegate`; runner: `1 passed`. Code `server/src/hooks.ts` (`userPromptSubmit`, `isSddRepo`) |
+| R2 | met | `hooks-setup.spec.ts::"a write delegate in an SDD repo asks with the warning…"` — asserts `ask` + `SDD_DELEGATE_WARNING` (mentions `/sdd-delegate`), not for `sdd_task_delegate` nor read; runner: `1 passed` |
+| R3 | met | `guardrails.spec.ts::"restores the worker's specs/ edits, keeps them out of the diff and of delegation_apply"` — asserts diff only `index.ts`, `specs_modified` with both files, `specs/` intact after `applyWorktree`; runner: `1 passed`; negative control: `restoreSpecs` skipped → `1 failed`. Code `server/src/worktree.ts` |
+| R4 | met | `guardrails.spec.ts::"strips git/GitHub credentials, limits git to local transports and refuses pushes over https"` — asserts every credential var absent, `GIT_TERMINAL_PROMPT=0`, `GIT_ALLOW_PROTOCOL=file`, `GH_CONFIG_DIR` exists, empty `credential.helper`, push → `transport 'https' not allowed`; runner: `1 passed`; negative controls: credential removal off → `1 failed`; `GIT_ALLOW_PROTOCOL` off → `1 failed`. Code `server/src/worker-env.ts` |
+| R5 | met | `guardrails.spec.ts::"puts a gh that always refuses first on PATH, in read mode without a worktree too"` — asserts `gh pr create` exit 1 + `GH_SHIM_MESSAGE`, shim dir first on PATH; runner: `1 passed`; negative control: PATH untouched → `1 failed` |
+| R6 | met | `guardrails.spec.ts::"flags a branch the worker pushed past the hooks and says how to delete it"` — asserts `worker_push` with remote/branch, branch present in the bare remote, `git push origin --delete <branch>` in `nextSteps`; `"guardrails.checkRemotePush=false skips the check"`; runner: `1 passed` each; negative control: detection off → `1 failed`. Code `server/src/remote-check.ts` |
+| R7 | met | `sdd-task-delegation.spec.ts::"sdd-guardrails R7/E3: files outside the task's Files are drift and leave it unverified"` — asserts `sdd.drift` `["otro.ts"]`, `verified: false`, `outside_task_files`, `SPEC DRIFT` step; runner: `1 passed`; negative control: `scopeFiles` not passed → `1 failed` |
+| R8 | met | `guardrails.spec.ts::"records specs_modified, worker_push and outside_task_files without any credential value"` — asserts the JSONL entry's three violation types with string `detail`; runner: `1 passed` |
+| E1 | met | `hooks-setup.spec.ts::"without specs/ nothing changes"` — no warning and the current context with an empty `specs/<slug>/`; runner: `1 passed`; negative control: any `specs/` dir counts → `1 failed` |
+| E2 | met | `guardrails.spec.ts::"read mode reports specs_modified next to write_in_read_mode"`; runner: `1 passed` |
+| E3 | met | `sdd-task-delegation.spec.ts::"sdd-guardrails R7/E3…"` — created `src/nuevo.ts` (listed) is not drift; runner: `1 passed` |
+| E4 | met | `guardrails.spec.ts::"a directory entry covers its subtree; paths are normalized"`; runner: `1 passed` |
+| E5 | met | `guardrails.spec.ts::"E5/E8: appends GIT_CONFIG_* entries and reuses the PATH key's own case"` — entries start at index 1, index 0 untouched; runner: `1 passed`; negative control: start forced to 0 → `1 failed` |
+| E6 | met | `guardrails.spec.ts::"an unreachable remote is a note, not a violation; no remotes means no note"` — `http://127.0.0.1:9/x.git` → note `push check skipped: origin:`, no violation; runner: `1 passed`; negative control: failure as violation → `1 failed` |
+| E7 | met | same case, second clause — repo without remotes has no `push check` note; runner: `1 passed` |
+| E8 | partially met | `guardrails.spec.ts::"E5/E8…"` asserts `Path` key reuse and `gh.cmd` exists; PATHEXT resolution on Windows is evidenced only by the CI job `test (windows-latest, …)` running the R5 case — pending (Pipeline below) |
+| E9 | met | `guardrails.spec.ts::"strips git…"` (response) and `"records specs_modified…"` (response + JSONL) — `secret-value-do-not-leak` absent; runner: `1 passed` each |
+
+Coverage: surfaces API ✅ (R3, R6, R7, R8) · hooks ✅ (R1, R2) · worker environment ✅ (R4, R5) · sensitive ground: access control R4, R5 · traceability R6, R8 · data handling E9 · data lifecycle non-goal · repeat-request correctness non-goal · accessibility non-goal
+Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 17 passed (17) · Tests 197 passed (197)` (baseline 181 passed (181); +16 new, 0 skipped) · `claude plugin validate .` ✅ `√ Validation passed` · `claude plugin test .` ✅ `7 pass, 0 fail` · Pipeline: `dist` ⏳ pending (local build leaves `server/dist` with no diff) · matrix ubuntu/macos/windows × Node 20/22 ⏳ pending
+Attribution: none — no failure required attribution
+Tests removed: none
+Clean-code sweep: none · close calls: `workerGitEnv` kept as a one-line wrapper over `gitConfigEnv` — its existing test in `delegate.spec.ts` still pins the hooks-only shape
+Shortcuts declared: none
+Dead-code sweep: none — `tsc --noUnusedLocals --noUnusedParameters` reports nothing in the change set; `workerGitEnv` is still reached by `delegate.spec.ts` only — kept as the tested hooks-only helper (close call above) (scope: this tree)
+Excluded from inventory: none
+Documentation: `docs/sdd-guardrails.md` (with Operating), README and skill match the names in the code (checked by grep against `server/src`)
+Success criteria: SC1 met on emission — `worker_push` is emitted and audited (`guardrails.spec.ts` R6 and R8 cases); its value is read on the user's remote · SC2 pending — needs a real `codex` run asking it to push and open a PR, on the user's machine
+Integration: not opened yet
