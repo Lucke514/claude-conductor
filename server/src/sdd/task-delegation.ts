@@ -150,7 +150,8 @@ export async function sddTaskDelegate(
     ctx,
   );
 
-  const verification = r.worktreePath ? await verifyTask(r.worktreePath, task, feature.gates, ctx.config.verify.timeoutMs) : [];
+  // A cancelled worker's partial diff is not verified: the user asked it to stop.
+  const verification = r.worktreePath && r.status === "success" ? await verifyTask(r.worktreePath, task, feature.gates, ctx.config.verify.timeoutMs) : [];
   const acceptance = parseAcceptance(r.output, acceptanceItems(feature, task));
   // Pipeline-only gates are read from CI later; anything else must have run and passed.
   const drift = (r.violations ?? []).flatMap((v) => (v.type === "outside_task_files" ? v.files : []));
@@ -167,7 +168,10 @@ export async function sddTaskDelegate(
   };
   const notes = [...(r.notes ?? [])];
   const steps: string[] = [];
-  if (r.status !== "success") {
+  if (r.status === "cancelled" || r.status === "partial") {
+    // A cancelled or partial task stays claimed: the user decides whether to resume or hand it back.
+    steps.push(`${task.id} was ${r.status === "partial" ? "left partial (out of time, with changes)" : "cancelled"} and stays claimed by ${owner}. To hand it back: \`sdd_task_release\` with slug "${feature.slug}" and task "${task.id}", then commit.`);
+  } else if (r.status !== "success") {
     await writeOwner(ctx.projectDir, feature, task.id, "—");
     const commit = commitCommand(feature, task.id, "release").display;
     sdd.handback = { owner: "—", commit };

@@ -2,9 +2,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadConfig } from "./config.js";
+import { loadConfig, type ProviderConfig } from "./config.js";
 import { checkHealth, makeAdapters, type ProviderStatus } from "./health.js";
-import { ptyAvailable } from "./process.js";
+import { ptyAvailable, runProcess } from "./process.js";
 import { PROVIDER_NAMES, type ProviderAdapter, type ProviderName } from "./providers/types.js";
 import { pluginRoot } from "./setup.js";
 import type { StateStore } from "./state.js";
@@ -120,7 +120,8 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   checks.push(mcpConfigCheck(opts.pluginRoot ?? pluginRoot()));
 
   const agy = config.providers.antigravity;
-  if (agy.enabled && (agy.usePty ?? true)) {
+  // stream-json (the default) runs without a PTY; only text/json need node-pty.
+  if (agy.enabled && (agy.usePty ?? (agy.outputFormat ?? "stream-json") !== "stream-json")) {
     checks.push(
       (await ptyAvailable())
         ? { name: "node-pty", level: "ok", detail: "loaded" }
@@ -131,6 +132,10 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   const adapters = opts.adapters ?? makeAdapters(config);
   const statuses = await checkHealth(config, opts.store, adapters);
   for (const st of statuses) checks.push(providerCheck(st));
+  const codexSt = statuses.find((s) => s.provider === "codex");
+  if (codexSt?.enabled && codexSt.installed) checks.push(await codexTransportCheck(config.providers.codex));
+  const agySt = statuses.find((s) => s.provider === "antigravity");
+  if (agySt?.enabled && agySt.installed) checks.push(await agyFlagsCheck(config.providers.antigravity));
 
   for (const p of PROVIDER_NAMES) {
     const st = statuses.find((s) => s.provider === p)!;
@@ -160,6 +165,39 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   }
 
   return { ok: checks.every((c) => c.level !== "fail"), checks };
+}
+
+/** E1: which transport codex will really use. */
+export async function codexTransportCheck(cfg: ProviderConfig): Promise<DoctorCheck> {
+  const name = "codex: transport";
+  if (cfg.transport === "exec") return { name, level: "ok", detail: "exec (providers.codex.transport)" };
+  const r = await runProcess({ command: cfg.binaryPath ?? "codex", args: ["app-server", "--help"], cwd: process.cwd(), timeoutMs: 15_000 });
+  return r.exitCode === 0
+    ? { name, level: "ok", detail: "app-server (JSON-RPC; falls back to exec if it fails)" }
+    : {
+        name,
+        level: "warn",
+        detail: "exec: this codex has no app-server, so no progress events or clean interrupt",
+        fix: "update codex (npm i -g @openai/codex), or set providers.codex.transport: \"exec\" to silence this",
+      };
+}
+
+/** E2: the agy flags the defaults rely on. */
+export async function agyFlagsCheck(cfg: ProviderConfig): Promise<DoctorCheck> {
+  const name = "antigravity: flags";
+  const r = await runProcess({ command: cfg.binaryPath ?? "agy", args: ["--help"], cwd: process.cwd(), timeoutMs: 15_000 });
+  const help = `${r.stdout}\n${r.stderr}`;
+  const missing = [
+    (cfg.outputFormat ?? "stream-json") === "stream-json" && !/stream-json/.test(help) ? "--output-format stream-json" : "",
+    !cfg.writeModeArgs && !/--dangerously-skip-permissions/.test(help) ? "--dangerously-skip-permissions" : "",
+  ].filter(Boolean);
+  if (missing.length === 0) return { name, level: "ok", detail: "stream-json and --dangerously-skip-permissions available" };
+  return {
+    name,
+    level: "warn",
+    detail: `this agy does not list ${missing.join(" and ")}`,
+    fix: "update Antigravity CLI, or set providers.antigravity.outputFormat: \"text\" / writeModeArgs explicitly",
+  };
 }
 
 function liveFix(p: ProviderName, type: string | undefined): string {

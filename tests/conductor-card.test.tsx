@@ -193,6 +193,17 @@ describe('conductor header', () => {
     await ui.unmount()
   })
 
+  test('a delegation the server reports in state.json jobs shows on its provider card with its progress', async ($, on) => {
+    const job = { id: 'j1', provider: 'antigravity', mode: 'write', task: 'refactor payments', phase: 'running', startedAt: new Date(NOW - 42_000).toISOString(), lastProgress: 'running npm test', pid: 1 }
+    const clock = world(on, { ...FILES, '/home/u/.claude/multi-provider/state.json': { ...STATE, jobs: [job] } })
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await clock.advance(10)
+    const t = await text(ui)
+    expect(t).toContain('tocando · write · 00:42')
+    expect(t).toContain('refactor payments — running npm test')
+    await ui.unmount()
+  })
+
   test('first use teaches the next step', async ($, on) => {
     const fresh = { chain: STATE.chain, providers: { codex: { health: { installed: true, enabled: true, auth: 'ok' } }, antigravity: { health: { installed: true, enabled: true, auth: 'unknown' } } } }
     const clock = world(on, { '/home/u/.claude/multi-provider/state.json': fresh })

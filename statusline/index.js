@@ -81,10 +81,8 @@ function providerStatus(p, now) {
     return { kind: "cooldown", remaining: breaker.cooldownUntil - now };
   }
   if (breaker.state === "open" || breaker.state === "half_open") return { kind: "half_open" };
-  const m = p.metrics;
-  if (m && m.lastError && Date.now() - Date.parse(m.lastError.at) < 10 * 60 * 1000 && m.lastError.at >= (m.lastCallAt || "")) {
-    return { kind: "degraded" };
-  }
+  // Same rule as the conductor card (DEGRADED_AFTER): two failures in a row the provider is to blame for.
+  if ((breaker.consecutiveFailures || 0) >= 2) return { kind: "degraded" };
   if (!p.health && !p.metrics) return { kind: "unknown" };
   return { kind: "ok" };
 }

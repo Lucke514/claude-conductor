@@ -6,7 +6,7 @@ import { delegate } from "../src/delegate.js";
 import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
 import { applyWorktree, cleanupWorktrees, readMeta, removeWorktree } from "../src/worktree.js";
-import { FAKE_CODEX, makeRepo, testConfig, tmpDir } from "./helpers.js";
+import { FAKE_CODEX, isAlive, makeRepo, testConfig, tmpDir } from "./helpers.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
 
@@ -232,6 +232,81 @@ describe("delegate (integration with fake CLIs)", () => {
     expect(entry1?.sdd).toBeUndefined();
     expect(entry2?.sdd).toEqual({ slug: "demo", taskId: "T1" });
     expect(Object.keys(entry2?.sdd ?? {})).toEqual(["slug", "taskId"]);
+  });
+});
+
+/** Resolves once `file` exists (the fake worker is running), then returns its contents. */
+async function waitForFile(file: string): Promise<string> {
+  for (let i = 0; i < 100; i++) {
+    if (existsSync(file)) return readFileSync(file, "utf8");
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`timed out waiting for ${file}`);
+}
+
+describe("delegate cancellation", () => {
+  afterEach(() => {
+    delete process.env.FAKE_PID_FILE;
+  });
+
+  it("R6/E3: aborting a write kills the worker, tries no other provider, keeps the breaker and the partial diff", async () => {
+    const repo = makeRepo();
+    const pidFile = path.join(tmpDir(), "pid");
+    process.env.FAKE_MODE = "hang-write";
+    process.env.FAKE_PID_FILE = pidFile;
+    const ac = new AbortController();
+    const c = { ...ctx(repo), signal: ac.signal };
+    const run = delegate({ provider: "codex", task: "long job", mode: "write" }, c);
+    const pid = Number(await waitForFile(pidFile));
+    ac.abort();
+    const r = await run;
+    expect(r.status).toBe("cancelled");
+    expect(r.attempts).toEqual([expect.objectContaining({ provider: "codex", errorType: "CANCELLED" })]);
+    for (let i = 0; i < 40 && isAlive(pid); i++) await new Promise((res) => setTimeout(res, 50));
+    expect(isAlive(pid)).toBe(false);
+    expect(r.diff).toContain("partial work");
+    expect(r.worktreePath && existsSync(r.worktreePath)).toBe(true);
+    expect(r.nextSteps[0]).toContain("Cancelled");
+    const s = await c.store.read();
+    expect(s.providers.codex?.breaker?.consecutiveFailures ?? 0).toBe(0);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("R6: a signal aborted before the call starts no worker", async () => {
+    const repo = makeRepo();
+    const ac = new AbortController();
+    ac.abort();
+    const r = await delegate({ provider: "codex", task: "never", mode: "write" }, { ...ctx(repo), signal: ac.signal });
+    expect(r.status).toBe("cancelled");
+    expect(r.attempts).toEqual([]);
+    expect(git(repo, "branch", "--list", "mp/*")).toBe("");
+  });
+});
+
+describe("provider-reliability R4/R5: idle timeout and partial results", () => {
+  it("R5: a write that stalls after changing files ends as partial, with one attempt and its diff", async () => {
+    const repo = makeRepo();
+    process.env.FAKE_MODE = "hang-write";
+    const c = ctx(repo, { defaults: { idleTimeoutMs: 300 } });
+    const r = await delegate({ provider: "codex", task: "big job", mode: "write" }, c);
+    expect(r.status).toBe("partial");
+    expect(r.attempts).toEqual([expect.objectContaining({ provider: "codex", errorType: "STALLED" })]);
+    expect(r.diff).toContain("partial work");
+    expect(r.patchFile && existsSync(r.patchFile)).toBe(true);
+    expect(r.nextSteps[0]).toContain("ran out of time");
+    expect(git(repo, "branch", "--list", "mp/*").split("\n").filter(Boolean)).toHaveLength(1);
+    expect((await c.store.read()).providers.codex?.breaker?.consecutiveFailures ?? 0).toBe(0);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("R5: without changes, a timeout is retried per retryOn and nothing is kept", async () => {
+    const repo = makeRepo();
+    process.env.FAKE_MODE = "stall";
+    const c = ctx(repo, { retry: { maxRetries: 1, baseDelayMs: 1, maxDelayMs: 2 } });
+    const r = await delegate({ provider: "codex", task: "quiet", mode: "write", timeoutMs: 400, fallback: false }, c);
+    expect(r.status).toBe("failed");
+    expect(r.attempts.map((a) => a.errorType)).toEqual(["TIMEOUT", "TIMEOUT"]);
+    expect(git(repo, "branch", "--list", "mp/*")).toBe("");
   });
 });
 

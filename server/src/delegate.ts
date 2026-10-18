@@ -7,6 +7,7 @@ import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
 import { PROVIDER_NAMES, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
 import { recordCall, recordRecent, taskLabel, type StateStore } from "./state.js";
+import type { JobRegistry } from "./jobs.js";
 import { checkRemotePush, type PushViolation } from "./remote-check.js";
 import { ensureShims, workerEnv } from "./worker-env.js";
 import { collectChanges, createWorktree, removeWorktree, type Changes, type Violation, type WorktreeMeta } from "./worktree.js";
@@ -29,7 +30,7 @@ export interface DelegateParams {
   sdd?: { slug: string; taskId: string };
 }
 
-export type DelegateStatus = "success" | "fallback_to_claude" | "failed";
+export type DelegateStatus = "success" | "fallback_to_claude" | "failed" | "cancelled" | "partial";
 
 export interface DelegateResponse {
   id: string;
@@ -80,222 +81,268 @@ export interface DelegateContext {
   instanceId: string;
   adapters?: Record<ProviderName, ProviderAdapter>;
   sleep?: (ms: number) => Promise<void>;
+  /** The MCP request's cancellation: kills the worker and stops the chain. */
+  signal?: AbortSignal;
+  /** Registers the delegation for delegation_status / delegation_cancel. */
+  jobs?: JobRegistry;
 }
+
+/** Failed writes whose worktree is kept when it has changes. */
+const KEEP_ON: string[] = ["CANCELLED", "TIMEOUT", "STALLED"];
+/** Of those, the ones that end the chain as `partial` (R5); CANCELLED ends it as `cancelled`. */
+const STOP_ON: string[] = ["TIMEOUT", "STALLED"];
 
 export async function delegate(params: DelegateParams, ctx: DelegateContext): Promise<DelegateResponse> {
   const started = Date.now();
   const id = `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomBytes(3).toString("hex")}`;
   const { config } = ctx;
   const mode: Mode = params.mode ?? config.defaults.mode;
-  const timeoutMs = params.timeoutMs ?? config.defaults.timeoutMs;
+  const timeoutMs = params.timeoutMs ?? (mode === "write" ? config.defaults.writeTimeoutMs : config.defaults.timeoutMs);
   const sessionKey = params.sessionId ?? ctx.instanceId;
-
-  const built = await buildPrompt({
-    task: params.task,
-    mode,
-    files: params.files ?? [],
-    projectDir: ctx.projectDir,
-    maxFileBytes: config.defaults.maxFileBytes,
-    maxTotalBytes: config.defaults.maxTotalBytes,
-    ...(params.extraOutput ? { extraOutput: params.extraOutput } : {}),
-  });
-
-  const routing = params.provider === "auto" ? routeTask(params.task, config.routing, params.taskType) : undefined;
-  const first = params.provider === "auto" ? routing?.provider : params.provider;
-  const order: ChainEntry[] = resolveOrder(config.chain, first, params.provider === "auto" ? true : (params.fallback ?? true));
-
-  const adapters = ctx.adapters ?? makeAdapters(config);
-  const breaker = makeBreaker(config);
-  const state = await ctx.store.read();
-  for (const p of PROVIDER_NAMES) breaker.load(p, state.providers[p]?.breaker);
-
-  const violations: NonNullable<DelegateResponse["violations"]> = [];
-  const notes: string[] = [];
-  let kept: { meta: WorktreeMeta; changes: Changes } | undefined;
-
-  const repoRoot = await repoRootOf(ctx.projectDir);
-  const isolate = mode === "write" || config.isolation.readMode === "worktree";
-  if (mode === "write" && !repoRoot) {
-    return finish({
-      provider: null,
-      model: null,
-      status: "failed",
-      output: "",
-      attempts: [],
-      summary: "write mode requires a git repository (changes are isolated in a git worktree)",
-    });
+  // The job's controller follows the MCP request's signal and delegation_cancel alike.
+  const signal = ctx.jobs
+    ? ctx.jobs.start({ id, provider: null, mode, task: taskLabel(params.task), ...(params.sdd ? { sdd: params.sdd } : {}) }, ctx.signal).signal
+    : ctx.signal;
+  try {
+    return await run();
+  } finally {
+    await ctx.jobs?.finish(id);
   }
 
-  await ensureShims();
-  const execute = async (provider: ProviderName, adapter: ProviderAdapter): Promise<ProviderResult> => {
-    let meta: WorktreeMeta | undefined;
-    if (isolate && repoRoot) {
-      meta = await createWorktree({
-        cwd: repoRoot,
-        provider,
-        includeUncommitted: config.isolation.includeUncommitted,
-        symlink: config.isolation.symlink,
-        ...(params.sdd ? { sdd: params.sdd } : {}),
+  async function run(): Promise<DelegateResponse> {
+
+    const built = await buildPrompt({
+      task: params.task,
+      mode,
+      files: params.files ?? [],
+      projectDir: ctx.projectDir,
+      maxFileBytes: config.defaults.maxFileBytes,
+      maxTotalBytes: config.defaults.maxTotalBytes,
+      ...(params.extraOutput ? { extraOutput: params.extraOutput } : {}),
+    });
+
+    const routing = params.provider === "auto" ? routeTask(params.task, config.routing, params.taskType) : undefined;
+    const first = params.provider === "auto" ? routing?.provider : params.provider;
+    const order: ChainEntry[] = resolveOrder(config.chain, first, params.provider === "auto" ? true : (params.fallback ?? true));
+
+    const adapters = ctx.adapters ?? makeAdapters(config);
+    const breaker = makeBreaker(config);
+    const state = await ctx.store.read();
+    for (const p of PROVIDER_NAMES) breaker.load(p, state.providers[p]?.breaker);
+
+    const violations: NonNullable<DelegateResponse["violations"]> = [];
+    const notes: string[] = [];
+    let kept: { meta: WorktreeMeta; changes: Changes } | undefined;
+
+    const repoRoot = await repoRootOf(ctx.projectDir);
+    const isolate = mode === "write" || config.isolation.readMode === "worktree";
+    if (mode === "write" && !repoRoot) {
+      return finish({
+        provider: null,
+        model: null,
+        status: "failed",
+        output: "",
+        attempts: [],
+        summary: "write mode requires a git repository (changes are isolated in a git worktree)",
       });
     }
-    const model = provider === params.provider ? params.model : undefined;
-    let result: ProviderResult;
-    try {
-      result = await adapter.run({
-        prompt: built.prompt,
-        cwd: meta?.path ?? ctx.projectDir,
-        mode,
-        timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
-        ...(model ? { model } : {}),
-        env: workerEnv(meta),
-      });
-    } catch (err) {
-      result = { ok: false, output: "", exitCode: null, durationMs: 0, error: { type: "NON_ZERO_EXIT", message: (err as Error).message } };
-    }
-    if (result.notes) notes.push(...result.notes.map((n) => `${provider}: ${n}`));
-    if (meta) {
-      const changes = await collectChanges(meta, config.defaults.maxDiffBytes, `${id}-${provider}`);
-      violations.push(...changes.violations);
-      if (config.guardrails.checkRemotePush) {
-        const pushed = await checkRemotePush(meta.repoRoot, meta.branch);
-        violations.push(...pushed.violations);
-        notes.push(...pushed.notes);
-      }
-      if (mode === "read" && changes.files.length > 0) {
-        violations.push({
-          type: "write_in_read_mode",
-          detail: `${provider} modified ${changes.files.length} file(s) in read mode; changes were discarded: ${changes.files.slice(0, 10).join(", ")}`,
+
+    await ensureShims();
+    let lastHadChanges = false;
+    const execute = async (provider: ProviderName, adapter: ProviderAdapter): Promise<ProviderResult> => {
+      let meta: WorktreeMeta | undefined;
+      if (isolate && repoRoot) {
+        meta = await createWorktree({
+          cwd: repoRoot,
+          provider,
+          includeUncommitted: config.isolation.includeUncommitted,
+          symlink: config.isolation.symlink,
+          ...(params.sdd ? { sdd: params.sdd } : {}),
         });
       }
-      if (params.scopeFiles && mode === "write" && changes.files.length > 0) {
-        const outside = outsideScope(changes.files, params.scopeFiles);
-        if (outside.length > 0) {
+      ctx.jobs?.setProvider(id, provider, meta);
+      const model = provider === params.provider ? params.model : undefined;
+      let result: ProviderResult;
+      try {
+        result = await adapter.run({
+          prompt: built.prompt,
+          cwd: meta?.path ?? ctx.projectDir,
+          mode,
+          timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
+          ...(model ? { model } : {}),
+          env: workerEnv(meta),
+          ...(signal ? { signal } : {}),
+          ...(ctx.jobs ? { onProgress: (chunk: string) => ctx.jobs?.progress(id, chunk) } : {}),
+          idleTimeoutMs: config.defaults.idleTimeoutMs,
+        });
+      } catch (err) {
+        result = { ok: false, output: "", exitCode: null, durationMs: 0, error: { type: "NON_ZERO_EXIT", message: (err as Error).message } };
+      }
+      if (result.notes) notes.push(...result.notes.map((n) => `${provider}: ${n}`));
+      if (meta) {
+        const changes = await collectChanges(meta, config.defaults.maxDiffBytes, `${id}-${provider}`);
+        ctx.jobs?.setFilesChanged(id, changes.files.length);
+        violations.push(...changes.violations);
+        if (config.guardrails.checkRemotePush) {
+          const pushed = await checkRemotePush(meta.repoRoot, meta.branch);
+          violations.push(...pushed.violations);
+          notes.push(...pushed.notes);
+        }
+        if (mode === "read" && changes.files.length > 0) {
           violations.push({
-            type: "outside_task_files",
-            detail: `${provider} changed ${outside.length} file(s) outside the task's Files: ${outside.slice(0, 10).join(", ")}`,
-            files: outside,
+            type: "write_in_read_mode",
+            detail: `${provider} modified ${changes.files.length} file(s) in read mode; changes were discarded: ${changes.files.slice(0, 10).join(", ")}`,
           });
         }
+        if (params.scopeFiles && mode === "write" && changes.files.length > 0) {
+          const outside = outsideScope(changes.files, params.scopeFiles);
+          if (outside.length > 0) {
+            violations.push({
+              type: "outside_task_files",
+              detail: `${provider} changed ${outside.length} file(s) outside the task's Files: ${outside.slice(0, 10).join(", ")}`,
+              files: outside,
+            });
+          }
+        }
+        // A cancelled, timed-out or stalled write keeps what the worker already did (E3, R5), like a finished one.
+        const keep = result.ok || KEEP_ON.includes(result.error?.type ?? "NON_ZERO_EXIT");
+        lastHadChanges = mode === "write" && changes.files.length > 0;
+        if (mode === "write" && keep && changes.files.length > 0) {
+          kept = { meta, changes };
+        } else {
+          await removeWorktree(meta).catch(() => undefined);
+          if (mode === "write" && result.ok) notes.push(`${provider}: finished without changing any file`);
+        }
       }
-      if (mode === "write" && result.ok && changes.files.length > 0) {
-        kept = { meta, changes };
-      } else {
-        await removeWorktree(meta).catch(() => undefined);
-        if (mode === "write" && result.ok) notes.push(`${provider}: finished without changing any file`);
-      }
-    }
-    return result;
-  };
-
-  const outcome = await runChain(order, {
-    adapters,
-    breaker,
-    config,
-    execute,
-    ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
-    onAttempt: async (provider, result) => {
-      await ctx.store.update((s) => {
-        recordCall(s, {
-          provider,
-          durationMs: result.durationMs,
-          sessionKey,
-          ...(result.usage ? { usage: result.usage } : {}),
-          ...(result.error ? { error: result.error } : {}),
-        });
-        (s.providers[provider] ??= {}).breaker = breaker.snapshot(provider);
-      });
-    },
-  });
-
-  // Persist breaker transitions also for skipped (open) providers.
-  await ctx.store.update((s) => {
-    s.chain = [...config.chain];
-    for (const p of PROVIDER_NAMES) (s.providers[p] ??= {}).breaker = breaker.snapshot(p);
-  });
-
-  const result = outcome.result;
-  return finish({
-    provider: outcome.provider ?? null,
-    model: result?.model ?? null,
-    status: outcome.status,
-    output: result?.output ?? "",
-    attempts: outcome.attempts,
-    ...(outcome.summary ? { summary: outcome.summary } : {}),
-    ...(result?.usage ? { usage: result.usage } : {}),
-  });
-
-  async function finish(
-    r: Pick<DelegateResponse, "provider" | "model" | "status" | "output" | "attempts"> & Partial<DelegateResponse>,
-  ): Promise<DelegateResponse> {
-    const response: DelegateResponse = {
-      id,
-      mode,
-      files: built.files,
-      durationMs: Date.now() - started,
-      nextSteps: [],
-      ...r,
+      return result;
     };
-    if (routing) response.routing = { rule: routing.rule, provider: routing.provider };
-    if (kept && r.status === "success") {
-      response.diff = kept.changes.diff;
-      response.diffTruncated = kept.changes.truncated;
-      response.filesChanged = kept.changes.files;
-      response.worktreePath = kept.meta.path;
-      response.branch = kept.meta.branch;
-      if (kept.changes.patchFile) response.patchFile = kept.changes.patchFile;
+
+    const outcome = await runChain(order, {
+      adapters,
+      breaker,
+      config,
+      execute,
+      ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
+      ...(signal ? { signal } : {}),
+      shouldStop: (_provider, result) => lastHadChanges && STOP_ON.includes(result.error?.type ?? "NON_ZERO_EXIT"),
+      onAttempt: async (provider, result) => {
+        await ctx.store.update((s) => {
+          recordCall(s, {
+            provider,
+            durationMs: result.durationMs,
+            sessionKey,
+            ...(result.usage ? { usage: result.usage } : {}),
+            ...(result.error ? { error: result.error } : {}),
+          });
+          (s.providers[provider] ??= {}).breaker = breaker.snapshot(provider);
+        });
+      },
+    });
+
+    // Persist breaker transitions also for skipped (open) providers.
+    await ctx.store.update((s) => {
+      s.chain = [...config.chain];
+      for (const p of PROVIDER_NAMES) (s.providers[p] ??= {}).breaker = breaker.snapshot(p);
+    });
+
+    const result = outcome.result;
+    return finish({
+      provider: outcome.provider ?? null,
+      model: result?.model ?? null,
+      status: outcome.status,
+      output: result?.output ?? "",
+      attempts: outcome.attempts,
+      ...(outcome.summary ? { summary: outcome.summary } : {}),
+      ...(result?.usage ? { usage: result.usage } : {}),
+    });
+
+    async function finish(
+      r: Pick<DelegateResponse, "provider" | "model" | "status" | "output" | "attempts"> & Partial<DelegateResponse>,
+    ): Promise<DelegateResponse> {
+      const response: DelegateResponse = {
+        id,
+        mode,
+        files: built.files,
+        durationMs: Date.now() - started,
+        nextSteps: [],
+        ...r,
+      };
+      if (routing) response.routing = { rule: routing.rule, provider: routing.provider };
+      if (kept && (r.status === "success" || r.status === "cancelled" || r.status === "partial")) {
+        response.diff = kept.changes.diff;
+        response.diffTruncated = kept.changes.truncated;
+        response.filesChanged = kept.changes.files;
+        response.worktreePath = kept.meta.path;
+        response.branch = kept.meta.branch;
+        if (kept.changes.patchFile) response.patchFile = kept.changes.patchFile;
+      }
+      if (violations.length > 0) response.violations = violations;
+      if (notes.length > 0) response.notes = notes;
+      response.nextSteps = nextSteps(response);
+
+      await ctx.store
+        .update((s) =>
+          recordRecent(s, {
+            id,
+            at: new Date().toISOString(),
+            requested: params.provider,
+            provider: response.provider,
+            mode,
+            status: response.status,
+            task: taskLabel(params.task),
+            durationMs: response.durationMs,
+            ...(response.filesChanged ? { filesChanged: response.filesChanged.length } : {}),
+            ...(params.sdd ? { sdd: { slug: params.sdd.slug, taskId: params.sdd.taskId } } : {}),
+            ...(violations.length ? { violations: violations.map((v) => ({ type: v.type, detail: v.detail })) } : {}),
+          }),
+        )
+        .catch(() => undefined);
+
+      await appendAudit({
+        id,
+        ts: new Date().toISOString(),
+        requestedProvider: params.provider,
+        provider: response.provider,
+        mode,
+        status: response.status,
+        durationMs: response.durationMs,
+        promptSha256: built.sha256,
+        promptBytes: Buffer.byteLength(built.prompt),
+        filesCount: built.files.filter((f) => f.included).length,
+        ...(response.model ? { model: response.model } : {}),
+        ...(routing ? { routingRule: routing.rule } : {}),
+        attempts: response.attempts.map((a) => ({
+          provider: a.provider,
+          ...(a.errorType ? { errorType: a.errorType } : {}),
+          ...(a.skipped ? { skipped: a.skipped } : {}),
+          ...(a.retry ? { retry: a.retry } : {}),
+          ...(a.durationMs !== undefined ? { durationMs: a.durationMs } : {}),
+        })),
+        ...(response.filesChanged ? { filesChanged: response.filesChanged.length } : {}),
+        ...(violations.length ? { violations: violations.map((v) => ({ type: v.type, detail: v.detail })) } : {}),
+        sessionKey,
+        ...(params.sdd ? { sdd: { slug: params.sdd.slug, taskId: params.sdd.taskId } } : {}),
+      }).catch(() => undefined);
+      return response;
     }
-    if (violations.length > 0) response.violations = violations;
-    if (notes.length > 0) response.notes = notes;
-    response.nextSteps = nextSteps(response);
-
-    await ctx.store
-      .update((s) =>
-        recordRecent(s, {
-          id,
-          at: new Date().toISOString(),
-          requested: params.provider,
-          provider: response.provider,
-          mode,
-          status: response.status,
-          task: taskLabel(params.task),
-          durationMs: response.durationMs,
-          ...(response.filesChanged ? { filesChanged: response.filesChanged.length } : {}),
-          ...(params.sdd ? { sdd: { slug: params.sdd.slug, taskId: params.sdd.taskId } } : {}),
-          ...(violations.length ? { violations: violations.map((v) => ({ type: v.type, detail: v.detail })) } : {}),
-        }),
-      )
-      .catch(() => undefined);
-
-    await appendAudit({
-      id,
-      ts: new Date().toISOString(),
-      requestedProvider: params.provider,
-      provider: response.provider,
-      mode,
-      status: response.status,
-      durationMs: response.durationMs,
-      promptSha256: built.sha256,
-      promptBytes: Buffer.byteLength(built.prompt),
-      filesCount: built.files.filter((f) => f.included).length,
-      ...(response.model ? { model: response.model } : {}),
-      ...(routing ? { routingRule: routing.rule } : {}),
-      attempts: response.attempts.map((a) => ({
-        provider: a.provider,
-        ...(a.errorType ? { errorType: a.errorType } : {}),
-        ...(a.skipped ? { skipped: a.skipped } : {}),
-        ...(a.retry ? { retry: a.retry } : {}),
-        ...(a.durationMs !== undefined ? { durationMs: a.durationMs } : {}),
-      })),
-      ...(response.filesChanged ? { filesChanged: response.filesChanged.length } : {}),
-      ...(violations.length ? { violations: violations.map((v) => ({ type: v.type, detail: v.detail })) } : {}),
-      sessionKey,
-      ...(params.sdd ? { sdd: { slug: params.sdd.slug, taskId: params.sdd.taskId } } : {}),
-    }).catch(() => undefined);
-    return response;
   }
 }
 
 function nextSteps(r: DelegateResponse): string[] {
+  if (r.status === "partial") {
+    return [
+      `The worker ran out of time (${r.attempts.at(-1)?.errorType ?? "TIMEOUT"}) after changing files; nothing was retried. Its work is in ${r.worktreePath} (see \`diff\`, full patch in \`patchFile\`).`,
+      "Review it like any diff. Keep it: `delegation_apply` with the worktreePath and finish the rest yourself, or delegate the remainder. Drop it: `delegation_discard`.",
+    ];
+  }
+  if (r.status === "cancelled") {
+    return r.worktreePath
+      ? [
+          `Cancelled. The worker's changes so far stay in ${r.worktreePath} (see \`diff\`).`,
+          "Keep them: `delegation_apply` with the worktreePath, then finish the task yourself. Drop them: `delegation_discard`.",
+        ]
+      : ["Cancelled before the worker changed anything. No other provider was tried."];
+  }
   if (r.status === "fallback_to_claude") {
     return ["No worker could complete the task. Do it yourself (Claude); see `summary` for why each provider failed."];
   }

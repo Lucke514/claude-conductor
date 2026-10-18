@@ -45,6 +45,7 @@ export type ProviderStateFile = {
     tokensToday?: number
     durationMsToday?: number
     lastError?: { type: string; message?: string; at: string } | null
+    lastNotice?: { type: string; message?: string; at: string } | null
     lastCallAt?: string | null
   }
   history?: { at: string; ok: boolean; tokens: number; durationMs: number }[]
@@ -66,6 +67,7 @@ export type StateFile = {
   chain?: string[]
   providers?: { codex?: ProviderStateFile; antigravity?: ProviderStateFile }
   recent?: RecentFile[]
+  jobs?: { id: string; provider: string | null; mode: string; task: string; sdd?: { slug: string; taskId: string }; phase: string; startedAt: string; lastProgress?: string }[]
 }
 
 declare module 'claude-code' {

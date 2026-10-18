@@ -1,6 +1,6 @@
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import type { MpConfig } from "./config.js";
-import type { ErrorType, ProviderAdapter, ProviderError, ProviderName, ProviderResult } from "./providers/types.js";
+import { isAttributable, type ErrorType, type ProviderAdapter, type ProviderError, type ProviderName, type ProviderResult } from "./providers/types.js";
 import type { RunResult } from "./process.js";
 
 // ---------------------------------------------------------------------------
@@ -11,7 +11,7 @@ import type { RunResult } from "./process.js";
 const PATTERN_ORDER: ErrorType[] = ["AUTH", "QUOTA", "RATE_LIMIT"];
 
 export function classifyFailure(
-  run: Pick<RunResult, "exitCode" | "timedOut" | "spawnError">,
+  run: Pick<RunResult, "exitCode" | "timedOut" | "spawnError"> & Partial<Pick<RunResult, "cancelled" | "stalled">>,
   text: string,
   patterns: Partial<Record<ErrorType, RegExp[]>>,
 ): ProviderError | undefined {
@@ -22,6 +22,9 @@ export function classifyFailure(
     }
     return { type: "NON_ZERO_EXIT", message: run.spawnError.message };
   }
+  // Killed by the plugin: the exit code (null) says nothing about the provider.
+  if (run.cancelled) return { type: "CANCELLED", message: "delegation cancelled" };
+  if (run.stalled) return { type: "STALLED", message: "no output for the idle timeout; process was killed" };
   if (run.timedOut) return { type: "TIMEOUT", message: "process exceeded timeout and was killed" };
   if (run.exitCode === 127) return { type: "NOT_INSTALLED", message: "exit code 127 (command not found)" };
   // Patterns are checked even when exit code is 0: some CLIs print the error and exit 0.
@@ -63,7 +66,7 @@ export interface Attempt {
   durationMs?: number;
 }
 
-export type ChainStatus = "success" | "fallback_to_claude" | "failed";
+export type ChainStatus = "success" | "fallback_to_claude" | "failed" | "cancelled" | "partial";
 
 export interface ChainOutcome {
   status: ChainStatus;
@@ -86,6 +89,13 @@ export interface ChainDeps {
   execute: (provider: ProviderName, adapter: ProviderAdapter) => Promise<ProviderResult>;
   /** Called after every attempt (for metrics / state.json). */
   onAttempt?: (provider: ProviderName, result: ProviderResult) => Promise<void> | void;
+  /** Once aborted, no further attempt starts and the outcome is `cancelled`. */
+  signal?: AbortSignal;
+  /**
+   * True when a failed attempt left work worth keeping (a write that timed out or stalled
+   * with changes): the chain stops with `partial` instead of retrying or moving on (R5).
+   */
+  shouldStop?: (provider: ProviderName, result: ProviderResult) => boolean;
 }
 
 const NO_RETRY: ErrorType[] = ["AUTH", "NOT_INSTALLED", "QUOTA"];
@@ -109,7 +119,16 @@ export async function runChain(order: ChainEntry[], deps: ChainDeps): Promise<Ch
   const attempts: Attempt[] = [];
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
+  const cancelled = (provider?: ProviderName, result?: ProviderResult): ChainOutcome => ({
+    status: "cancelled",
+    ...(provider ? { provider } : {}),
+    ...(result ? { result } : {}),
+    attempts,
+    summary: "delegation cancelled: no further provider was tried",
+  });
+
   for (const entry of order) {
+    if (deps.signal?.aborted) return cancelled();
     if (entry === "claude") {
       return { status: "fallback_to_claude", attempts, summary: summarize(attempts) };
     }
@@ -129,6 +148,8 @@ export async function runChain(order: ChainEntry[], deps: ChainDeps): Promise<Ch
     }
 
     for (let retry = 0; ; retry++) {
+      // A cancel during the backoff below must not start another attempt.
+      if (deps.signal?.aborted) return cancelled();
       const result = await deps.execute(entry, adapter);
       await deps.onAttempt?.(entry, result);
       if (result.ok) {
@@ -137,7 +158,16 @@ export async function runChain(order: ChainEntry[], deps: ChainDeps): Promise<Ch
         return { status: "success", provider: entry, result, attempts };
       }
       const type = result.error?.type ?? "NON_ZERO_EXIT";
-      deps.breaker.onFailure(entry);
+      // A cancellation is never the provider's fault: no breaker, no retry, no next provider.
+      if (type === "CANCELLED" || deps.signal?.aborted) {
+        attempts.push({ provider: entry, errorType: "CANCELLED", error: "cancelled", durationMs: result.durationMs });
+        return cancelled(entry, result);
+      }
+      if (deps.shouldStop?.(entry, result)) {
+        attempts.push({ provider: entry, errorType: type, error: result.error?.message ?? type, durationMs: result.durationMs });
+        return { status: "partial", provider: entry, result, attempts, summary: `${entry}: ${type} with changes in its worktree; kept as a partial result` };
+      }
+      if (isAttributable(type)) deps.breaker.onFailure(entry);
       attempts.push({
         provider: entry,
         error: result.error?.message ?? "unknown error",

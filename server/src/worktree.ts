@@ -267,6 +267,14 @@ export async function applyWorktree(worktreePath: string, id: string): Promise<{
   return { applied: true, files: changes.files, output, ...(changes.patchFile ? { patchFile: changes.patchFile } : {}) };
 }
 
+/** Files the worker has changed so far, read-only (no staging): for delegation_status while it runs. */
+export async function changedFiles(meta: Pick<WorktreeMeta, "path" | "baseCommit" | "symlinks">): Promise<string[]> {
+  const lines = async (args: string[]) => (await git(args, meta.path)).stdout.split(/\r?\n/).filter(Boolean);
+  const files = new Set([...(await lines(["diff", "--name-only", meta.baseCommit])), ...(await lines(["ls-files", "--others", "--exclude-standard"]))]);
+  for (const link of meta.symlinks) files.delete(link);
+  return [...files].sort();
+}
+
 /** The repo's mp/* worktrees under the plugin's directory, as `git worktree list` has them. */
 async function managedWorktrees(repoRoot: string): Promise<{ path: string; branch: string }[]> {
   const list = (await git(["worktree", "list", "--porcelain"], repoRoot)).stdout;

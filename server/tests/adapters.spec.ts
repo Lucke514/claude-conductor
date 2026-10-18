@@ -96,14 +96,15 @@ describe("AntigravityAdapter", () => {
     expect(r.ok).toBe(true);
     expect(r.output).toContain("## Summary");
     const { args } = JSON.parse(readFileSync(process.env.FAKE_ARGS_FILE, "utf8"));
-    expect(args).toEqual(["--model", "gemini-x", "-p", "do the thing\nline 2"]);
+    // provider-reliability: stream-json is the default output format.
+    expect(args).toEqual(["--model", "gemini-x", "--output-format", "stream-json", "-p", "do the thing\nline 2"]);
   });
 
   it("PTY mode: the CLI sees a TTY (works around the -p no-TTY hang) and output is ANSI-free", async () => {
     const dir = tmpDir();
     process.env.FAKE_MODE = "needs-tty";
     process.env.FAKE_ARGS_FILE = path.join(dir, "args.json");
-    const r = await agy({ usePty: true }).run(req(dir, "read", 10_000));
+    const r = await agy({ usePty: true, outputFormat: "text" }).run(req(dir, "read", 10_000));
     expect(r.ok).toBe(true);
     expect(r.output).toBe("tty ok");
     expect(JSON.parse(readFileSync(process.env.FAKE_ARGS_FILE, "utf8")).tty).toBe(true);
@@ -113,6 +114,57 @@ describe("AntigravityAdapter", () => {
     process.env.FAKE_MODE = "needs-tty";
     const r = await agy({ usePty: false }).run(req(tmpDir(), "read", 700));
     expect(r.error?.type).toBe("TIMEOUT");
+  });
+
+  it("provider-reliability: the real stream-json capture parses to its answer and usage", async () => {
+    const { parseAgyStream } = await import("../src/providers/antigravity.js");
+    const text = readFileSync(path.join(path.dirname(FAKE_AGY), "agy-stream.jsonl"), "utf8");
+    const p = parseAgyStream(text);
+    expect(p.response).toBe("OK\n");
+    expect(p.status).toBe("SUCCESS");
+    expect(p.usage).toEqual({ inputTokens: 12745, cachedInputTokens: 0, outputTokens: 49 });
+    expect(p.permission).toBeUndefined();
+    process.env.FAKE_MODE = "stream-fixture";
+    const progress: string[] = [];
+    const r = await agy({}).run({ ...req(tmpDir()), onProgress: (c) => progress.push(c) });
+    expect(r).toMatchObject({ ok: true, output: "OK" });
+    expect(progress.join("")).toContain("active run_command: ls -la .");
+  });
+
+  it("R3: a step waiting for approval ends the attempt with PERMISSION_BLOCKED and the command", async () => {
+    process.env.FAKE_MODE = "stream-permission";
+    const started = Date.now();
+    const r = await agy({}).run(req(tmpDir(), "write", 30_000));
+    expect(r.error?.type).toBe("PERMISSION_BLOCKED");
+    expect(r.error?.message).toContain("run_command: npm test");
+    expect(r.error?.message).toContain("writeModeArgs");
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it("R2: write mode skips permission prompts by default; read mode does not", async () => {
+    const dir = tmpDir();
+    process.env.FAKE_ARGS_FILE = path.join(dir, "args.json");
+    await agy({}).run(req(dir, "write"));
+    const w = JSON.parse(readFileSync(process.env.FAKE_ARGS_FILE, "utf8"));
+    expect(w.args).toContain("--dangerously-skip-permissions");
+    expect(w.tty).toBe(false);
+    await agy({}).run(req(dir, "read"));
+    expect(JSON.parse(readFileSync(process.env.FAKE_ARGS_FILE, "utf8")).args).not.toContain("--dangerously-skip-permissions");
+    await agy({ writeModeArgs: [] }).run(req(dir, "write"));
+    expect(JSON.parse(readFileSync(process.env.FAKE_ARGS_FILE, "utf8")).args).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("E6: agy in text mode forwards no output to progress; codex exec forwards event labels only", async () => {
+    const seen: string[] = [];
+    await agy({ outputFormat: "text", usePty: false }).run({ ...req(tmpDir()), onProgress: (c) => seen.push(c) });
+    expect(seen).toEqual([]);
+  });
+
+  it("E2: an agy without stream-json falls back to text with a note", async () => {
+    process.env.FAKE_MODE = "unknown-flag";
+    const r = await agy({}).run(req(tmpDir()));
+    expect(r).toMatchObject({ ok: true, output: "text answer" });
+    expect(r.notes?.join(" ")).toContain("text mode");
   });
 
   it("PTY timeout kills the tree", async () => {

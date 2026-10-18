@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { CircuitBreaker } from "../src/circuit-breaker.js";
 import { parseConfig } from "../src/config.js";
 import { backoffDelay, classifyFailure, resolveOrder, routeTask, runChain } from "../src/fallback.js";
+import { isAttributable } from "../src/providers/types.js";
+import { emptyState, recordCall } from "../src/state.js";
 import { effectiveErrorPatterns } from "../src/config.js";
 import type { ErrorType, ProviderAdapter, ProviderName, ProviderResult } from "../src/providers/types.js";
 
@@ -149,5 +151,54 @@ describe("order, backoff and routing", () => {
     expect(routeTask("anything", routing, "refactor")?.provider).toBe("antigravity");
     // Word-start match only: "preview" must not hit "review".
     expect(routeTask("show a preview", routing)).toBeUndefined();
+  });
+});
+
+describe("provider-reliability R7: attributable failures", () => {
+  it("CANCELLED, STALLED and PERMISSION_BLOCKED never move the breaker; AUTH does", async () => {
+    for (const type of ["STALLED", "PERMISSION_BLOCKED"] as ErrorType[]) {
+      const { deps, breaker } = setup({ codex: [err(type)], antigravity: [ok()] });
+      const r = await runChain(["codex", "antigravity", "claude"], deps);
+      expect(r.status).toBe("success");
+      expect(breaker.snapshot("codex").consecutiveFailures).toBe(0);
+    }
+    const c = setup({ codex: [err("CANCELLED")], antigravity: [ok()] });
+    expect((await runChain(["codex", "antigravity", "claude"], c.deps)).status).toBe("cancelled");
+    expect(c.breaker.snapshot("codex").consecutiveFailures).toBe(0);
+    expect(c.calls).toEqual(["codex"]);
+    const a = setup({ codex: [err("AUTH")], antigravity: [ok()] });
+    await runChain(["codex", "antigravity", "claude"], a.deps);
+    expect(a.breaker.snapshot("codex").consecutiveFailures).toBe(1);
+  });
+
+  it("review fixes: NOT_INSTALLED never opens the breaker; a cancel during backoff starts no new attempt", async () => {
+    const { deps, breaker } = setup({ codex: [err("NOT_INSTALLED")], antigravity: [ok()] });
+    await runChain(["codex", "antigravity", "claude"], deps);
+    expect(breaker.snapshot("codex").consecutiveFailures).toBe(0);
+    const ac = new AbortController();
+    const s = setup({ codex: [err("RATE_LIMIT"), ok()], antigravity: [ok()] });
+    s.deps.sleep.mockImplementation(async () => {
+      ac.abort();
+      return undefined;
+    });
+    const r = await runChain(["codex", "antigravity", "claude"], { ...s.deps, signal: ac.signal });
+    expect(r.status).toBe("cancelled");
+    expect(s.calls).toEqual(["codex"]);
+  });
+
+  it("classifyFailure reads the plugin's own kills before the exit code", () => {
+    expect(classifyFailure({ exitCode: null, timedOut: false, cancelled: true }, "", {})?.type).toBe("CANCELLED");
+    expect(classifyFailure({ exitCode: null, timedOut: false, stalled: true }, "", {})?.type).toBe("STALLED");
+    expect(isAttributable("TIMEOUT")).toBe(true);
+    expect(isAttributable("STALLED")).toBe(false);
+  });
+
+  it("state keeps notices apart from errors", () => {
+    const s = emptyState();
+    recordCall(s, { provider: "codex", durationMs: 1, sessionKey: "k", error: { type: "CANCELLED", message: "x" } });
+    expect(s.providers.codex?.metrics?.lastError).toBeNull();
+    expect(s.providers.codex?.metrics?.lastNotice?.type).toBe("CANCELLED");
+    recordCall(s, { provider: "codex", durationMs: 1, sessionKey: "k", error: { type: "AUTH", message: "y" } });
+    expect(s.providers.codex?.metrics?.lastError?.type).toBe("AUTH");
   });
 });

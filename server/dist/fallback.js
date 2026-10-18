@@ -1,3 +1,4 @@
+import { isAttributable } from "./providers/types.js";
 // ---------------------------------------------------------------------------
 // Error classification
 // ---------------------------------------------------------------------------
@@ -11,6 +12,11 @@ export function classifyFailure(run, text, patterns) {
         }
         return { type: "NON_ZERO_EXIT", message: run.spawnError.message };
     }
+    // Killed by the plugin: the exit code (null) says nothing about the provider.
+    if (run.cancelled)
+        return { type: "CANCELLED", message: "delegation cancelled" };
+    if (run.stalled)
+        return { type: "STALLED", message: "no output for the idle timeout; process was killed" };
     if (run.timedOut)
         return { type: "TIMEOUT", message: "process exceeded timeout and was killed" };
     if (run.exitCode === 127)
@@ -54,7 +60,16 @@ export function resolveOrder(chain, first, fallback = true) {
 export async function runChain(order, deps) {
     const attempts = [];
     const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    const cancelled = (provider, result) => ({
+        status: "cancelled",
+        ...(provider ? { provider } : {}),
+        ...(result ? { result } : {}),
+        attempts,
+        summary: "delegation cancelled: no further provider was tried",
+    });
     for (const entry of order) {
+        if (deps.signal?.aborted)
+            return cancelled();
         if (entry === "claude") {
             return { status: "fallback_to_claude", attempts, summary: summarize(attempts) };
         }
@@ -73,6 +88,9 @@ export async function runChain(order, deps) {
             continue;
         }
         for (let retry = 0;; retry++) {
+            // A cancel during the backoff below must not start another attempt.
+            if (deps.signal?.aborted)
+                return cancelled();
             const result = await deps.execute(entry, adapter);
             await deps.onAttempt?.(entry, result);
             if (result.ok) {
@@ -81,7 +99,17 @@ export async function runChain(order, deps) {
                 return { status: "success", provider: entry, result, attempts };
             }
             const type = result.error?.type ?? "NON_ZERO_EXIT";
-            deps.breaker.onFailure(entry);
+            // A cancellation is never the provider's fault: no breaker, no retry, no next provider.
+            if (type === "CANCELLED" || deps.signal?.aborted) {
+                attempts.push({ provider: entry, errorType: "CANCELLED", error: "cancelled", durationMs: result.durationMs });
+                return cancelled(entry, result);
+            }
+            if (deps.shouldStop?.(entry, result)) {
+                attempts.push({ provider: entry, errorType: type, error: result.error?.message ?? type, durationMs: result.durationMs });
+                return { status: "partial", provider: entry, result, attempts, summary: `${entry}: ${type} with changes in its worktree; kept as a partial result` };
+            }
+            if (isAttributable(type))
+                deps.breaker.onFailure(entry);
             attempts.push({
                 provider: entry,
                 error: result.error?.message ?? "unknown error",

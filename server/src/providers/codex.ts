@@ -1,6 +1,7 @@
 import { effectiveErrorPatterns, type ProviderConfig } from "../config.js";
 import { classifyFailure, excerpt } from "../fallback.js";
 import { findInPath, runProcess } from "../process.js";
+import { runAppServer, TransportUnavailable } from "./codex-app-server.js";
 import type { HealthReport, ProviderAdapter, ProviderRequest, ProviderResult, TokenUsage } from "./types.js";
 
 /**
@@ -89,6 +90,23 @@ export function parseCodexJsonl(stdout: string): CodexParsed {
   return parsed;
 }
 
+/** `codex exec --json` lines → one label per event (`item.completed reasoning`), never their text. */
+function execProgress(onProgress: (chunk: string) => void): (chunk: string) => void {
+  let pending = "";
+  return (chunk) => {
+    const lines = (pending + chunk).split(/\r?\n/);
+    pending = lines.pop() ?? "";
+    for (const line of lines) {
+      try {
+        const ev = JSON.parse(line) as CodexEvent;
+        if (ev.type) onProgress(`${ev.type}${ev.item?.type ? ` ${ev.item.type}` : ""}\n`);
+      } catch {
+        /* stray log line: not forwarded */
+      }
+    }
+  };
+}
+
 export class CodexAdapter implements ProviderAdapter {
   readonly name = "codex" as const;
 
@@ -114,7 +132,21 @@ export class CodexAdapter implements ProviderAdapter {
     return args;
   }
 
+  /** `app-server` (default) with `exec` as the fallback when the transport cannot be used (E1). */
   async run(req: ProviderRequest): Promise<ProviderResult> {
+    if ((this.cfg.transport ?? "app-server") === "app-server") {
+      try {
+        return await runAppServer(this.cfg, req, this.bin);
+      } catch (err) {
+        if (!(err instanceof TransportUnavailable)) throw err;
+        const r = await this.runExec(req);
+        return { ...r, notes: [`codex app-server unavailable (${err.message}); used codex exec`, ...(r.notes ?? [])] };
+      }
+    }
+    return this.runExec(req);
+  }
+
+  async runExec(req: ProviderRequest): Promise<ProviderResult> {
     const patterns = effectiveErrorPatterns("codex", this.cfg);
     const r = await runProcess({
       command: this.bin,
@@ -124,13 +156,18 @@ export class CodexAdapter implements ProviderAdapter {
       timeoutMs: req.timeoutMs,
       env: { NO_COLOR: "1", ...req.env },
       usePty: this.cfg.usePty ?? false,
+      ...(req.signal ? { signal: req.signal } : {}),
+      // Progress gets event types only: agent messages can quote files (E6).
+      ...(req.onProgress ? { onOutput: execProgress(req.onProgress) } : {}),
+      ...(req.idleTimeoutMs ? { idleTimeoutMs: req.idleTimeoutMs } : {}),
     });
     const model = req.model ?? this.cfg.model;
     const base = { exitCode: r.exitCode, durationMs: r.durationMs, notes: r.notes, ...(model ? { model } : {}) };
     const parsed = parseCodexJsonl(r.stdout);
+    if (r.cancelled) return { ...base, ok: false, output: parsed.finalMessage, error: { type: "CANCELLED", message: "delegation cancelled" } };
     const diagnostic = [r.stderr, ...parsed.errors].join("\n");
 
-    const clean = r.exitCode === 0 && !r.timedOut && parsed.finalMessage.trim() !== "";
+    const clean = r.exitCode === 0 && !r.timedOut && !r.stalled && parsed.finalMessage.trim() !== "";
     const failure = clean ? undefined : classifyFailure(r, diagnostic, patterns);
     if (failure) {
       return { ...base, ok: false, output: parsed.finalMessage, error: failure, ...(parsed.usage ? { usage: parsed.usage } : {}) };

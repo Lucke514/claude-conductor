@@ -1,6 +1,7 @@
 import { statePath } from "./paths.js";
 import { readJson, withLock, writeFileAtomic } from "./fsutil.js";
-import type { AuthState, ErrorType, ProviderName, TokenUsage } from "./providers/types.js";
+import type { JobSnapshot } from "./jobs.js";
+import { isAttributable, type AuthState, type ErrorType, type ProviderName, type TokenUsage } from "./providers/types.js";
 
 /**
  * Shared on-disk state (~/.claude/multi-provider/state.json). Read by the
@@ -34,6 +35,8 @@ export interface ProviderMetrics {
   tokensTotal: number;
   durationMsTotal: number;
   lastError: { type: ErrorType | "CIRCUIT_OPEN"; message: string; at: string } | null;
+  /** Last failure that was not the provider's fault (cancelled, stalled, permission): shown, never counted. */
+  lastNotice?: { type: ErrorType | "CIRCUIT_OPEN"; message: string; at: string } | null;
   lastCallAt: string | null;
 }
 
@@ -82,6 +85,8 @@ export interface MpState {
   /** Keyed by Claude Code session_id when known, else by MCP server instance id. */
   sessions: Record<string, SessionMetrics>;
   recent?: RecentDelegation[];
+  /** Delegations in flight (and recently lost ones), mirrored by the JobRegistry. */
+  jobs?: JobSnapshot[];
 }
 
 const MAX_SESSIONS = 30;
@@ -162,7 +167,11 @@ export function recordCall(s: MpState, rec: CallRecord, now = new Date()): void 
   m.durationMsToday += rec.durationMs;
   m.durationMsTotal += rec.durationMs;
   m.lastCallAt = now.toISOString();
-  if (rec.error) m.lastError = { ...rec.error, message: rec.error.message.slice(0, 200), at: now.toISOString() };
+  if (rec.error) {
+    const entry = { ...rec.error, message: rec.error.message.slice(0, 200), at: now.toISOString() };
+    if (isAttributable(rec.error.type)) m.lastError = entry;
+    else m.lastNotice = entry;
+  }
   p.metrics = m;
   const hist = p.history ?? [];
   hist.push({ at: now.toISOString(), ok: !rec.error, tokens, durationMs: rec.durationMs });

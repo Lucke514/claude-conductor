@@ -146,6 +146,23 @@ describe("sdd_task_* tools", () => {
     expect(readFileSync(s.tasksFile, "utf8")).toBe(TASKS);
   });
 
+  it("provider-reliability R6: a cancelled task keeps its Owner and names sdd_task_release", async () => {
+    const s = setup();
+    const claim = await claimAndCommit(s);
+    process.env.FAKE_MODE = "hang-write";
+    const ac = new AbortController();
+    const run = sddTaskDelegate({ slug: "demo", task: "T3" }, { ...s.ctx, signal: ac.signal });
+    await new Promise((r) => setTimeout(r, 700));
+    ac.abort();
+    const r = await run;
+    expect(r.status).toBe("cancelled");
+    expect(r.sdd.handback).toBeUndefined();
+    expect(r.sdd.verification).toEqual([]);
+    expect(readFileSync(s.tasksFile, "utf8")).toContain(`- **Owner**: ${claim.owner}`);
+    expect(r.nextSteps.join("\n")).toContain("sdd_task_release");
+    if (r.worktreePath) await removeWorktree(await readMeta(r.worktreePath));
+  });
+
   it("R9: sdd_task_release frees a claimed task; delegate rejects next and foreign owners", async () => {
     const s = setup();
     await claimAndCommit(s);

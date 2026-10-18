@@ -21,6 +21,18 @@ if (args[0] === "login" && args[1] === "status") {
   process.exit(0);
 }
 
+if (args[0] === "app-server") {
+  // Only FAKE_APPSERVER selects the JSON-RPC fake; otherwise behave like a codex without app-server.
+  if (process.env.FAKE_APPSERVER && args[1] === "--help") {
+    process.stdout.write("Usage: codex app-server [OPTIONS]\n");
+    process.exit(0);
+  } else if (process.env.FAKE_APPSERVER) {
+    await import("./fake-codex-app-server.mjs");
+  } else {
+    process.stderr.write("error: unrecognized subcommand 'app-server'\n");
+    process.exit(2);
+  }
+} else {
 if (process.env.FAKE_ARGS_FILE) writeFileSync(process.env.FAKE_ARGS_FILE, JSON.stringify(args));
 const cdIdx = args.indexOf("-C");
 const cwd = cdIdx >= 0 ? args[cdIdx + 1] : process.cwd();
@@ -51,6 +63,20 @@ process.stdin.on("end", () => {
       out({ type: "item.completed", item: { id: "i2", type: "agent_message", text: "## Changes\nadded file" } });
       out({ type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } });
       process.exit(0);
+      break;
+    }
+    case "hang-write": {
+      // Writes a file, reports progress, then never finishes (cancellation tests).
+      writeFileSync(path.join(cwd, "added-by-worker.txt"), "partial work\n");
+      if (process.env.FAKE_PID_FILE) writeFileSync(process.env.FAKE_PID_FILE, String(process.pid));
+      out({ type: "item.completed", item: { id: "i1", type: "reasoning", text: "working" } });
+      setInterval(() => {}, 1000);
+      break;
+    }
+    case "stall": {
+      // Reports once, then goes silent without touching any file (idle / total timeout tests).
+      out({ type: "item.completed", item: { id: "i1", type: "reasoning", text: "thinking" } });
+      setInterval(() => {}, 1000);
       break;
     }
     case "probe": {
@@ -133,3 +159,4 @@ process.stdin.on("end", () => {
       process.exit(99);
   }
 });
+}

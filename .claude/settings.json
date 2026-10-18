@@ -6,7 +6,8 @@
     "allow": [
       "mcp__plugin_multi-provider_multi-provider__sdd_feature_status",
       "mcp__plugin_multi-provider_multi-provider__providers_status",
-      "mcp__plugin_multi-provider_multi-provider__providers_config"
+      "mcp__plugin_multi-provider_multi-provider__providers_config",
+      "mcp__plugin_multi-provider_multi-provider__delegation_status"
     ]
   }
 }

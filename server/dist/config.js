@@ -26,8 +26,10 @@ const ProviderSchema = z.object({
     authCheckArgs: z.array(z.string()).optional(),
     /** Codex only: pass --skip-git-repo-check (worktrees live outside trusted dirs). */
     skipGitRepoCheck: z.boolean().optional(),
-    /** Antigravity only: "text" (default) or "json" (--output-format json). */
-    outputFormat: z.enum(["text", "json"]).optional(),
+    /** Antigravity only: "text", "json" or "stream-json" (events: progress, stalls, permission requests). */
+    outputFormat: z.enum(["text", "json", "stream-json"]).optional(),
+    /** Codex only: "app-server" (default; JSON-RPC, falls back to exec) or "exec". */
+    transport: z.enum(["app-server", "exec"]).optional(),
 });
 const RoutingTarget = z.union([
     z.enum(PROVIDER_NAMES),
@@ -40,6 +42,10 @@ export const ConfigSchema = z.object({
         .object({
         mode: z.enum(["read", "write"]).default("read"),
         timeoutMs: z.number().int().positive().default(600_000),
+        /** Total limit per attempt in write mode (a long task keeps going while it makes progress). */
+        writeTimeoutMs: z.number().int().positive().default(1_800_000),
+        /** Kill an attempt that prints nothing for this long (STALLED), well before the total limit. */
+        idleTimeoutMs: z.number().int().positive().default(120_000),
         maxFileBytes: z.number().int().positive().default(64 * 1024),
         maxTotalBytes: z.number().int().positive().default(512 * 1024),
         maxDiffBytes: z.number().int().positive().default(200 * 1024),
