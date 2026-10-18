@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { delegate, outsideScope } from "../src/delegate.js";
+import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
 import { CREDENTIAL_ENV, GH_SHIM_MESSAGE, pathKey, shimDir, workerEnv } from "../src/worker-env.js";
 import { applyWorktree, removeWorktree, readMeta } from "../src/worktree.js";
@@ -173,6 +174,28 @@ describe("task scope (R7, E4)", () => {
     process.env.FAKE_WRITE_FILE = "anything.txt";
     const { r } = await probe(makeRepo());
     expect(r.violations ?? []).toEqual([]);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+});
+
+describe("audit log (R8, E9)", () => {
+  it("records specs_modified, worker_push and outside_task_files without any credential value", async () => {
+    const repo = sddRepo();
+    const bare = tmpDir("mp-bare-");
+    git(bare, "init", "-q", "--bare");
+    git(repo, "remote", "add", "origin", bare);
+    process.env.GH_TOKEN = SECRET;
+    process.env.FAKE_MODE = "probe";
+    process.env.FAKE_PROBE_FILE = path.join(tmpDir(), "probe.json");
+    process.env.FAKE_PUSH = "origin";
+    process.env.FAKE_WRITE_FILE = "specs/demo/tasks.md,index.ts,extra.txt";
+    const r = await delegate({ provider: "codex", task: "audit", mode: "write", scopeFiles: ["index.ts"] }, ctx(repo));
+    const log = readdirSync(logsDir()).map((f) => readFileSync(path.join(logsDir(), f), "utf8")).join("");
+    const entry = log.split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.id === r.id);
+    expect(entry.violations.map((v: { type: string }) => v.type).sort()).toEqual(["outside_task_files", "specs_modified", "worker_push"]);
+    for (const v of entry.violations) expect(typeof v.detail).toBe("string");
+    expect(log).not.toContain(SECRET);
+    expect(JSON.stringify(r)).not.toContain(SECRET);
     await removeWorktree(await readMeta(r.worktreePath!));
   });
 });

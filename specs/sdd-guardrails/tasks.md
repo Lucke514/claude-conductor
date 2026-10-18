@@ -98,8 +98,8 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 
 ## T6 — Auditoría de las violaciones nuevas
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C6 · **Implements**: R8, E9
 - **Files**: `server/tests/guardrails.spec.ts`
 - **Do**: test que lee el JSONL de auditoría tras delegaciones que producen `specs_modified`, `worker_push` y `outside_task_files`.
@@ -107,7 +107,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
   - Las tres violaciones aparecen con `type` y `detail`.
   - Ningún valor de las variables quitadas aparece en el log.
 - **Verify**: `npm --prefix server test -- guardrails`
-- **Notes**: —
+- **Notes**: Caso "audit log (R8, E9)" en `server/tests/guardrails.spec.ts`: una delegación con las tres violaciones nuevas y `GH_TOKEN` puesto; el JSONL las registra con `type`/`detail` y no contiene el valor; sin cambios en `audit.ts` (ya escribía `violations`); commit `sdd-guardrails: T6 audit the new violations`. Gates: 197 passed. Clean-code: none · close calls: none
 
 ## T7 — Document the feature
 
