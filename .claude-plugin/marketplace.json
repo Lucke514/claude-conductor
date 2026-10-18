@@ -10,7 +10,7 @@
       "name": "multi-provider",
       "source": "./",
       "description": "Delegate tasks to Codex and Antigravity CLIs under Claude Code supervision (fallback chain, circuit breaker, isolated worktrees, no auto-merge).",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "category": "development",
       "tags": ["mcp", "codex", "antigravity", "delegation"]
     }

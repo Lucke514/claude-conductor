@@ -114,6 +114,7 @@ Comandos del plugin (también accesibles como `/multi-provider:<comando>`):
 /delegate auto refactoriza el módulo de pagos para inyectar el cliente HTTP
 /sdd-delegate sdd-guardrails next codex
 /sdd-delegate sdd-guardrails T2 --read
+/sdd-status [slug]
 /providers-status
 /providers-config
 /mp-setup [user|project]
@@ -141,6 +142,10 @@ Para features escritas con [spec-driven](https://github.com/Lucke514/spec-driven
 
 Detalle, formato de la respuesta y límites en [`docs/sdd-task-delegation.md`](docs/sdd-task-delegation.md).
 
+### Pipeline SDD (`/sdd-status`)
+
+`/sdd-status [slug]` muestra en qué etapa está cada feature (Spec → Plan → Tasks → Implementación → Verificación → Cerrada), el avance de sus tareas, el siguiente paso y avisos cuando los artefactos se contradicen: `ready_to_close`, `orphan_claim`, `closed_with_open_tasks`, `scope_mismatch`, `violations` y `malformed`. Todo sale de los artefactos y de `state.json`, sin LLM, y nunca escribe nada. Cada delegación de `sdd_task_delegate` queda registrada con `sdd: { slug, taskId }` en el log de auditoría y en `state.json`. Detalle en [`docs/sdd-traceability.md`](docs/sdd-traceability.md).
+
 ### Delegación automática
 
 Con la delegación automática activada (**por defecto**), no hace falta usar `/delegate`. En cada mensaje, un hook `UserPromptSubmit` le indica a Claude que decida por su cuenta si el pedido conviene delegarlo (revisión, refactor, feature, tests, análisis). Si conviene, Claude arma el brief, llama a `delegate` con `provider: "auto"` y verifica el resultado igual que con `/delegate`. Las conversaciones, las preguntas rápidas, los cambios mínimos y los comandos `/…` no se delegan. El modo `write` sigue pidiendo confirmación, y el diff solo se aplica con tu OK.
@@ -162,6 +167,7 @@ Herramientas MCP (servidor `multi-provider`):
 | `sdd_task_claim` | `{ slug, task: "T#"\|"G#"\|"next", provider? }` → escribe el `**Owner**` y devuelve el comando `commit` del claim |
 | `sdd_task_delegate` | `{ slug, task, mode?: "write"\|"read", timeoutMs? }` → la respuesta de `delegate` más `sdd: { acceptance, verification, verified, notesDraft, handback? }` |
 | `sdd_task_release` | `{ slug, task }` → `**Owner**` a `—` y el comando `commit` del handback |
+| `sdd_feature_status` | `{ slug? }` → solo lectura: sin slug, `{ features: [{ slug, stage, substage?, closed, total, current?, warnings, nextStep }], notes }`; con slug, el estado completo de la feature |
 
 Los valores de `status` son `success`, `fallback_to_claude` y `failed` (este último solo si la cadena no termina en `claude`).
 
@@ -256,9 +262,9 @@ En la banda (`abajo`) el header ocupa todo el ancho:
 ```
 
 - **Siempre expandido**: no hay versión compacta. En el panel lateral, las tarjetas se apilan en columna.
-- **Sesión**: repo y rama, delegaciones y tokens de la sesión, modelo (`Sonnet 5.5`, no el id), uso de contexto (`ctx`) y costo, leídos de `$.session` cada 5 s.
+- **Sesión**: repo y rama, delegaciones y tokens de la sesión, modelo (`Sonnet 5.5`, no el id), uso de contexto (`ctx`), costo y el usage de Claude Code: cada ventana de rate limit (`5h ▮▮▮▯▯▯ 42% · 2h10m`, `7d …`, `gasto`), en amarillo desde 80 % y rojo desde 95 %, y `usage —` sin lectura. En el panel lateral, donde no se ve la status line, las ventanas van en una línea propia. Se leen de `$.session` y se actualizan con cada `session.measure`.
 - **Proveedores**: una tarjeta por proveedor con estado, versión, auth, barras de llamadas, tokens y tiempo del día, y circuito con cuenta atrás. Durante una delegación, la tarjeta del proveedor muestra `⠹ tocando · write · 00:42` con borde latón y la tarea debajo.
-- **Spec activo** (si el proyecto usa [spec-driven](https://github.com/Lucke514/spec-driven)): lee `specs/*/tasks.md` (o el `## Tasks` de un `spec.md` Small) y muestra la feature con una tarea reclamada o, si no hay, la primera `approved` con tareas abiertas: tarea en curso o siguiente, avance `hechas/total` y owner.
+- **Spec-driven** (si el proyecto usa [spec-driven](https://github.com/Lucke514/spec-driven)): hasta 3 features en Implementación o Verificación, leídas cada 15 s de `sdd_feature_status`, con el formato `sdd-traceability ▸ Impl 5/7 · codex T6 ⏳ · ⚠ 1`. La tarea en curso aparece mientras corre su `/sdd-delegate`. Si el servidor MCP no responde, muestra la feature activa leída de `specs/*/tasks.md` (o del `## Tasks` de un `spec.md` Small).
 - **Atajos**: `1` `/providers-status`, `2` `/providers-config`, `3` limpiar worktrees, `4` `/mp-doctor`, `5` clean-terminal (los dígitos funcionan escribiéndolos solos en el prompt vacío).
 - **Estados**: *en curso* (borde latón), *primer uso* (sugiere `/delegate auto` y `/mp-doctor`), *degradado* (rojo solo en lo que bloquea, con su arreglo) y *solo Claude* (proveedores tachados en la cadena).
 - Desactivarlo: `"card": { "enabled": false }` en `multiprovider.json`. Posición por defecto: `"card": { "placement": "side" | "below" }`.
@@ -349,7 +355,7 @@ config/multiprovider.example.json     statusline/index.js   .github/workflows/ci
 specs/<slug>/{spec,plan,tasks}.md     docs/*.md
 server/  bootstrap.mjs · src/{index,cli,config,delegate,fallback,circuit-breaker,health,worktree,
          prompt-builder,process,state,audit,hooks,setup,sanitize,gh-scrub,doctor,worker-env,remote-check}.ts · providers/{types,codex,antigravity}.ts
-         sdd/{artifacts,brief,claim,verify,task-delegation}.ts
+         sdd/{artifacts,brief,claim,verify,task-delegation,pipeline}.ts
          tests/ (vitest *.spec.ts + binarios fake) · dist/ (compilado, versionado)
 ```
 

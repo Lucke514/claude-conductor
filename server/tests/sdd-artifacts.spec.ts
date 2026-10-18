@@ -1,7 +1,9 @@
+import { mkdirSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkReferences, loadFeature, parseGates, resolveTask, SddError } from "../src/sdd/artifacts.js";
+import { checkReferences, loadFeature, parseGates, parseScope, parseStatus, parseVerificationReports, readFeatureArtifacts, resolveTask, SddError } from "../src/sdd/artifacts.js";
 import { tmpDir } from "./helpers.js";
-import { PLAN, SPEC, TASKS, writeFeature } from "./sdd-fixtures.js";
+import { DELEGATION_REPORT, INTEGRATION_SCOPE, PLAN, SPEC, TASKS, writeFeature } from "./sdd-fixtures.js";
 
 describe("sdd artifacts", () => {
   it("R1: resolves T3 with its fields, verbatim text (E8) and parallel flag", async () => {
@@ -94,6 +96,89 @@ describe("sdd artifacts", () => {
       { gate: "Tests", commands: ['node -e "process.exit(0)"'], where: "`here`", pipelineOnly: false, baseline: "3 passed, 0 failed" },
       { gate: "Dist", commands: ["git diff --exit-code"], where: "`pipeline-only`", pipelineOnly: true, baseline: "—" },
       { gate: "Lint", commands: [], where: "—", pipelineOnly: false, baseline: "—" },
+    ]);
+  });
+});
+
+
+describe("traceability artifact readers", () => {
+  it("A1/A2: reads a spec-only Standard feature while loadFeature stays strict", async () => {
+    const root = tmpDir();
+    writeFeature(root, "draft-only", { "spec.md": SPEC });
+    expect(await readFeatureArtifacts(root, "draft-only")).toEqual({ spec: SPEC, depth: "standard" });
+    await expect(loadFeature(root, "draft-only")).rejects.toMatchObject({ code: "FEATURE_NOT_FOUND" });
+    await expect(readFeatureArtifacts(root, "../escape")).rejects.toMatchObject({ code: "INVALID_SLUG" });
+  });
+
+  it("E2/E4: preserves missing, unreadable and absent-Status artifacts without inventing draft", async () => {
+    const root = tmpDir();
+    writeFeature(root, "malformed", { "spec.md": "# Sin estado\n", "tasks.md": TASKS });
+    mkdirSync(path.join(root, "specs", "malformed", "plan.md"));
+    const artifacts = await readFeatureArtifacts(root, "malformed");
+    expect(artifacts.plan).toBeUndefined();
+    expect(parseStatus(artifacts.spec!)).toBeNull();
+    expect(parseStatus("> Status: draft")).toBe("draft");
+    writeFeature(root, "scope-only", { "scope.md": INTEGRATION_SCOPE });
+    expect((await readFeatureArtifacts(root, "scope-only")).spec).toBeUndefined();
+    await expect(loadFeature(root, "scope-only")).rejects.toMatchObject({ code: "FEATURE_NOT_FOUND" });
+    writeFeature(root, "healthy", { "spec.md": SPEC, "tasks.md": TASKS });
+    expect((await loadFeature(root, "healthy")).statuses.spec).toBe("approved");
+  });
+
+  it("retains Small detection and normalized artifact texts", async () => {
+    const root = tmpDir();
+    writeFeature(root, "small", { "spec.md": `${SPEC}\r\n## Tasks\r\n` });
+    expect(await readFeatureArtifacts(root, "small")).toMatchObject({ depth: "small", spec: `${SPEC}\n## Tasks\n` });
+    writeFeature(root, "small", { "plan.md": PLAN });
+    expect((await readFeatureArtifacts(root, "small")).depth).toBe("standard");
+  });
+
+  it("A3: parses the real delegation report snapshot including verdict counts", () => {
+    expect(parseVerificationReports(DELEGATION_REPORT.replace(/\n/g, "\r\n"))).toEqual([
+      { pass: 1, converged: false, verdicts: { met: 19, "partially met": 1 }, pending: expect.stringMatching(/^awaiting the user's decision on R10\/SC1/) },
+    ]);
+  });
+
+  it("A4/E8: no section or an empty reports section produces no reports", () => {
+    expect(parseVerificationReports(SPEC)).toEqual([]);
+    expect(parseVerificationReports(TASKS)).toEqual([]);
+    expect(parseVerificationReports(DELEGATION_REPORT.replace("## Verification reports", "## Otro título"))).toEqual([]);
+  });
+
+  it("E10: scopes reports, preserves verdict text and distinguishes missing convergence", () => {
+    const reports = `## Verification reports
+### Verification report — demostración — pass 2
+Converged: yes — revisión terminada
+| Verdict | Evidencia |
+|---|---|
+| cumplido | español |
+| cumplido | más texto |
+### Verification report — demostración — pass 3
+| Verdict | Evidencia |
+|---|---|
+| pendiente | falta revisar |
+## Otra sección
+### Verification report — ignorado — pass 4
+Converged: no
+`;
+    expect(parseVerificationReports(reports)).toEqual([
+      { pass: 2, converged: true, verdicts: { cumplido: 2 } },
+      { pass: 3, converged: null, verdicts: { pendiente: 1 } },
+    ]);
+  });
+
+  it("A5: parses all six real scope rows with numeric rank and Status", () => {
+    expect(parseScope(INTEGRATION_SCOPE.replace(/\n/g, "\r\n"))).toEqual([
+      { slug: "sdd-task-delegation", rank: 1, status: "in-progress" },
+      { slug: "sdd-guardrails", rank: 2, status: "done" },
+      { slug: "sdd-cross-review", rank: 3, status: "pending" },
+      { slug: "sdd-parallel-dispatch", rank: 4, status: "pending" },
+      { slug: "sdd-traceability", rank: 5, status: "in-progress" },
+      { slug: "sdd-packaging", rank: 6, status: "pending" },
+    ]);
+    expect(parseScope(SPEC)).toEqual([]);
+    expect(parseScope("| Slug | Rank | Status |\n|---|---|---|\n| demo | 2 | en revisión |\n| bad | — | pending |")).toEqual([
+      { slug: "demo", rank: 2, status: "en revisión" },
     ]);
   });
 });

@@ -143,6 +143,7 @@ export async function sddTaskDelegate(
       extraOutput: brief.extraOutput,
       mode,
       fallback: true,
+      sdd: { slug: feature.slug, taskId: task.id },
       ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
       ...(args.sessionId ? { sessionId: args.sessionId } : {}),
     },

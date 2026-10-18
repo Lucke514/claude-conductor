@@ -1,9 +1,16 @@
 // Contract of the values the conductor header keeps in $.state (self-contained:
 // mirrors the shapes in hooks/conductor/model.ts).
 
-export type Running = { provider: string; mode: string; task: string; startedAt: number }
+export type Running = { provider: string; mode: string; task: string; startedAt: number; slug?: string; taskId?: string }
 export type SessionTally = { calls: number; tokens: number }
-export type SessionMeta = { model?: string; ctxPercent?: number; costUsd?: number; repo?: string; branch?: string }
+export type SessionMeta = {
+  model?: string
+  ctxPercent?: number
+  costUsd?: number
+  repo?: string
+  branch?: string
+  rateLimits?: { kind: string; percentUsed: number; resetsAt?: string }[]
+}
 export type Cleaned = { at: number; rows: number }
 export type Placement = 'side' | 'below'
 
@@ -15,6 +22,19 @@ export type SpecProgress = {
   total: number
   current?: SpecTask & { state: 'en curso' | 'siguiente' }
 }
+
+export type PipelineFeature = {
+  slug: string
+  stage: string
+  substage?: string
+  closed: number
+  total: number
+  current?: { id: string; owner: string | null }
+  warnings: number
+  nextStep: string
+}
+/** The SDD line: the server's pipeline when it answers, else the local tasks.md progress. */
+export type SpecView = { features: PipelineFeature[] } | { progress: SpecProgress }
 
 export type ProviderStateFile = {
   health?: { installed?: boolean; enabled?: boolean; auth?: string; version?: string }
@@ -58,7 +78,7 @@ declare module 'claude-code' {
       verdicts: Record<string, string>
       session: SessionTally
       meta: SessionMeta
-      spec: SpecProgress | null
+      spec: SpecView | null
       cleaned: Cleaned | null
       placement: Placement
       paneShown: boolean

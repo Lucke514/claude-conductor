@@ -26,6 +26,7 @@ export interface DelegateParams {
   extraOutput?: string[];
   /** Claude Code session id (injected by the PreToolUse hook). */
   sessionId?: string;
+  sdd?: { slug: string; taskId: string };
 }
 
 export type DelegateStatus = "success" | "fallback_to_claude" | "failed";
@@ -134,6 +135,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
         provider,
         includeUncommitted: config.isolation.includeUncommitted,
         symlink: config.isolation.symlink,
+        ...(params.sdd ? { sdd: params.sdd } : {}),
       });
     }
     const model = provider === params.provider ? params.model : undefined;
@@ -258,6 +260,8 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
           task: taskLabel(params.task),
           durationMs: response.durationMs,
           ...(response.filesChanged ? { filesChanged: response.filesChanged.length } : {}),
+          ...(params.sdd ? { sdd: { slug: params.sdd.slug, taskId: params.sdd.taskId } } : {}),
+          ...(violations.length ? { violations: violations.map((v) => ({ type: v.type, detail: v.detail })) } : {}),
         }),
       )
       .catch(() => undefined);
@@ -285,6 +289,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
       ...(response.filesChanged ? { filesChanged: response.filesChanged.length } : {}),
       ...(violations.length ? { violations: violations.map((v) => ({ type: v.type, detail: v.detail })) } : {}),
       sessionKey,
+      ...(params.sdd ? { sdd: { slug: params.sdd.slug, taskId: params.sdd.taskId } } : {}),
     }).catch(() => undefined);
     return response;
   }

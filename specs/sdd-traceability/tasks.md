@@ -1,0 +1,198 @@
+<!-- Status enum: draft | in-review | approved | abandoned -->
+
+# Tasks: Pipeline y trazabilidad SDD
+
+> Spec: [spec.md](./spec.md) · Plan: [plan.md](./plan.md)
+> Status: approved
+> Last updated: 2026-10-18
+
+Una tarea = una sesión. Hecha significa:
+- su **Verify** pasa;
+- los gates del plan pasan sin fallos nuevos contra su baseline (`npm --prefix server run typecheck`, `npm --prefix server test`, `claude plugin validate .`, `claude plugin test .`);
+- `server/dist` está reconstruido y committeado si la tarea toca `server/src`;
+- el diff está limpio.
+
+Commits con prefijo `sdd-traceability: `, solo de Claude y sin trailers de atribución.
+
+Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T1; T5 espera a T2; T6 espera a T4 y T5 (comparte archivos de la card con T4); T7 va al final.
+
+## T1 [P] — Lectura tolerante y parsers de reportes y scope
+
+- [x] Done
+- **Owner**: —
+- **Component**: C1 · **Implements**: E2, E4, E8, E10
+- **Files**: `server/src/sdd/artifacts.ts`, `server/tests/sdd-artifacts.spec.ts`, `server/tests/sdd-fixtures.ts`
+- **Do**: En `artifacts.ts`, añadir:
+  - `readFeatureArtifacts(projectDir, slug)`, que devuelve `{ spec?, plan?, tasks?, depth }` sin lanzar por la ausencia de `plan.md` o `tasks.md`. `loadFeature` pasa a usarla, con el mismo contrato y los mismos errores.
+  - `parseVerificationReports(md)`, que lee las anclas `### Verification report — … — pass N`, la línea `Converged: yes|no …` y el conteo de veredictos de la primera columna `Verdict` de su tabla.
+  - `parseScope(md)`, que lee las filas `| Slug | … | Rank | Status |` de un `scope.md`.
+
+  Solo se interpretan las anclas en inglés (E10).
+- **Acceptance**: Una feature Standard con solo `spec.md` se lee sin error; `loadFeature` sigue lanzando `FEATURE_NOT_FOUND` en ese caso; el reporte de `specs/sdd-task-delegation/tasks.md` (copiado como fixture) da `pass 1`, `converged: false`; sin sección de reportes devuelve `[]` (E8); `parseScope` del `scope.md` real devuelve 6 filas con rank y Status; un spec sin `> Status:` se distingue de `draft` (E2); `sdd-artifacts.spec.ts` existente sigue pasando.
+- **Verify**: `npm --prefix server test -- sdd-artifacts`
+- **Notes**: Delegada a codex (delegación 20261018045707-be6d62). En `server/src/sdd/artifacts.ts`: `readFeatureArtifacts` (`loadFeature` la usa con el mismo contrato), `parseVerificationReports` y `parseScope`. En `server/tests/sdd-artifacts.spec.ts`, 7 casos con fixtures `DELEGATION_REPORT`/`INTEGRATION_SCOPE` en `sdd-fixtures.ts`. Gates: typecheck 0 errores, 207 passed (200 + 7), plugin validate ok, plugin test 7 pass. La verificación del worker falló solo porque el worktree no tenía `node_modules`; se corrió a mano en el worktree y se añadió `isolation.symlink` al proyecto. Clean-code: el conteo de veredictos con `Object.defineProperty` pasó a `Map` + `Object.fromEntries` · close calls: el fixture `DELEGATION_REPORT` copia el reporte entero — se queda, es lo que pide A3
+
+## T2 — Pipeline de etapas
+
+- [x] Done
+- **Owner**: —
+- **Component**: C1 · **Implements**: R1, R2, R3, R4, R8, E1, E2, E5, E6, E7, E8, E10, E11
+- **Files**: `server/src/sdd/pipeline.ts`, `server/tests/sdd-pipeline.spec.ts`, `server/tests/sdd-fixtures.ts`
+- **Do**: Implementar `featureStatus(projectDir, slug, recent?)` y `listFeatureStatus(projectDir, recent?)` según C1:
+  - etapas en el orden de R2, con el subestado de `Verificación`;
+  - `nextStep` por etapa (R3);
+  - avisos `ready_to_close`, `orphan_claim` (contra `recent`, Q3), `closed_with_open_tasks`, `scope_mismatch`, `violations` y `malformed` (R4, E2);
+  - orden por el rank de `scope.md` y luego por nombre;
+  - un directorio sin `spec.md` no cuenta como feature (E4);
+  - sin `recent`, se añade la nota "delegation state unavailable" y no se evalúa `orphan_claim` (E6).
+
+  No escribe ningún archivo (R8). La salida no incluye texto de `Do`/`Files` ni contenido de código (E11).
+- **Acceptance**:
+  - una fixture por etapa da la etapa esperada;
+  - la copia de `sdd-task-delegation` da `Verificación · pass 1 no convergido`;
+  - la copia de `sdd-guardrails` da `Cerrada`;
+  - cada código de aviso tiene un caso que lo produce y uno que no;
+  - una feature Small no pasa por `Plan` ni `Tasks`;
+  - un slug inexistente lista los disponibles;
+  - `specs/` tiene el mismo hash antes y después, y dos llamadas devuelven el mismo JSON.
+- **Verify**: `npm --prefix server test -- sdd-pipeline`
+- **Notes**: Delegada a codex (delegación 20261018050508-a861e9). `server/src/sdd/pipeline.ts` (`featureStatus`, `listFeatureStatus`) y `server/tests/sdd-pipeline.spec.ts` (17 casos). Al integrar: `VerificationReport.pending` (el texto tras `Converged: no —`) pasa al `nextStep` para que nombre lo que falta (SC1). Contra este repo: `sdd-guardrails` Cerrada, `sdd-task-delegation` `Verificación · pass 1 no convergido` con la decisión R10/SC1 en el siguiente paso. Gates: typecheck 0 errores, 228 passed (211 + 17), plugin validate ok, plugin test 9 pass. El gate automático marcó `statusline.spec.ts` por `NO_COLOR` en el entorno (G2), no por T2. Clean-code: none · close calls: `PipelineDelegation` amplía `RecentDelegation` con `sdd` mientras T3 no esté integrada — se simplifica al integrar T3
+
+## T3 [P] — `slug` y `taskId` en audit y state
+
+- [x] Done
+- **Owner**: —
+- **Component**: C2 · **Implements**: R5, E7
+- **Files**: `server/src/audit.ts`, `server/src/state.ts`, `server/src/delegate.ts`, `server/src/sdd/task-delegation.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/delegate.spec.ts`
+- **Do**:
+  - Añadir `sdd?: { slug: string; taskId: string }` a `AuditEntry`, `RecentDelegation` y `DelegateParams`.
+  - `delegate()` lo copia a `appendAudit` y `recordRecent`, y `sdd_task_delegate` lo rellena.
+  - El esquema zod de la herramienta pública `delegate` en `index.ts` no se toca.
+- **Acceptance**: Tras un `sdd_task_delegate` con el CLI falso, la última línea del JSONL de audit y `recent[0]` de `state.json` llevan `sdd: { slug, taskId }`; un `delegate` normal no lleva `sdd`; `delegate.spec.ts` y `sdd-task-delegation.spec.ts` existentes siguen pasando.
+- **Verify**: `npm --prefix server test -- sdd-task-delegation delegate`
+- **Notes**: Delegada a antigravity (delegación 20261018045859-13e576). El intento agotó el timeout de 10 min con el trabajo hecho y el reintento empezó de cero. Se integró el patch guardado del primer intento (`~/.claude/multi-provider/patches/20261018045859-13e576-antigravity.patch`, sin `server/dist`) y se detuvieron a mano el reintento y el fallback a codex. Archivos: `sdd?` en `AuditEntry`, `RecentDelegation` y `DelegateParams` (`delegate()` lo copia a audit y recent; `sdd_task_delegate` lo rellena), y tests en `delegate.spec.ts` y `sdd-task-delegation.spec.ts`. Al integrar: `RecentDelegation.violations` también se guarda en `state.json`, porque sin eso el aviso `violations` de T2 nunca se disparaba, y `PipelineDelegation` queda como `Partial<RecentDelegation>`. Gates: typecheck 0 errores, 230 passed, plugin validate ok, plugin test 9 pass. Clean-code: none · close calls: none
+
+## T4 [P] — Usage de Claude Code en la card
+
+- [x] Done
+- **Owner**: —
+- **Component**: C5 · **Implements**: R9, E12, E13, E14
+- **Files**: `hooks/conductor/model.ts`, `hooks/conductor/card.tsx`, `types/index.d.ts`, `server/tests/card-model.spec.ts`, `tests/conductor-card.test.tsx`
+- **Do**:
+  - En `model.ts`, añadir `rateLimitView(limits, now)` según C5: etiquetas `5h`/`7d`/`gasto` (cualquier otro tipo usa su `kind`), barra de 6, porcentaje tal cual, reinicio con `fmtDuration`, tono `warn` desde 80 y `error` desde 95, y `usage —` sin ventanas.
+  - En `card.tsx`:
+    - `loadMeta` guarda `usage.rateLimits` en `SessionMeta`;
+    - un `on('session.measure')` refresca `meta`;
+    - la cabecera dibuja las ventanas en la línea de modelo/ctx/costo en `side` y en una línea propia en `below` (E14).
+- **Acceptance**:
+  - el ejemplo de R9 da `5h ▮▮▮▯▯▯ 42% · 2h10m` y `7d ▮▯▯▯▯▯ 18.5%`;
+  - 80 → `warn` y 95 → `error`;
+  - `[]` → `usage —`;
+  - sin `resetsAt` se muestra sin tiempo de reinicio, y `112` se muestra tal cual con la barra llena (E13);
+  - el test de la card muestra las ventanas en `side` y en `below`;
+  - los tests existentes de la card siguen pasando.
+- **Verify**: `npm --prefix server test -- card-model` · `claude plugin test .`
+- **Notes**: Hecha por Claude en la sesión principal. En `hooks/conductor/model.ts`, `rateLimitView`/`rateLimitText`. En `card.tsx`: `loadMeta` guarda `rateLimits`, un `on('session.measure')` refresca ctx/costo/ventanas, y la cabecera las dibuja en la línea de modelo/ctx/costo cuando la card es ancha (≥ 100 columnas) y en una línea propia debajo cuando es angosta, que es el caso del panel lateral y de la banda angosta. `SessionMeta.rateLimits` está en `types/index.d.ts`. Tests: 4 casos en `card-model.spec.ts` y 2 en `conductor-card.test.tsx`. Gates: typecheck 0 errores, 211 passed (207 + 4), plugin validate ok, plugin test 9 pass (7 + 2). Clean-code: none · close calls: el criterio ancho/angosto usa el `wide` que ya tenía la cabecera en lugar de mirar el placement — se queda, el panel lateral (46 columnas) no cabe en una sola línea. El test de la card comprueba el texto en los tres sitios, pero no la estructura de línea propia, porque `ui.find` no ve keys de `Text` anidados
+
+## T5 — Herramienta `sdd_feature_status` y `/sdd-status`
+
+- [x] Done
+- **Owner**: —
+- **Component**: C3 · **Implements**: R6, E3, E9
+- **Files**: `server/src/index.ts`, `commands/sdd-status.md`, `server/tests/sdd-pipeline.spec.ts`
+- **Do**:
+  - Registrar `sdd_feature_status({ slug?, projectDir? })`: llama a `featureStatus`/`listFeatureStatus` con `recent` de `readState` y devuelve JSON. Es solo lectura y no lleva hook PreToolUse.
+  - Escribir `commands/sdd-status.md`: instruye a Claude a llamarla y a dibujar el pipeline en texto (`✓` etapa pasada, `▸` actual, `·` pendiente), con progreso, avisos y siguiente paso, sin ejecutar el siguiente paso.
+- **Acceptance**:
+  - sin `slug`, con `a` (3/8) y `b` Cerrada, se listan las dos;
+  - un repo sin `specs/` devuelve lista vacía y la nota "no SDD features" (E3);
+  - 50 fixtures se resuelven en < 1000 ms (E9);
+  - `claude plugin validate .` acepta el comando.
+- **Verify**: `npm --prefix server test -- sdd-pipeline` · `claude plugin validate .`
+- **Notes**: Hecha por Claude en la sesión principal. `sddFeatureStatus` en `server/src/sdd/pipeline.ts`, que devuelve el estado completo con `slug` o un `FeatureSummary` por feature (etapa, `closed/total`, tarea actual con owner, número de avisos, siguiente paso). Registrada como `sdd_feature_status` en `server/src/index.ts`; `commands/sdd-status.md` dibuja el pipeline sin ejecutar nada. G1 resuelto: `WorktreeMeta.sdd` (lo escribe `delegate()` vía `createWorktree`) y `listWorktrees` en `server/src/worktree.ts`, que comparte el parseo con `cleanupWorktrees`; una tarea con worktree vivo no es `orphan_claim`. Contra este repo: SC1 se cumple. Gates: typecheck 0 errores, 232 passed (230 + 2), plugin validate ok, plugin test 9 pass. Clean-code: el parseo de `git worktree list` pasó de `cleanupWorktrees` a `managedWorktrees` para no duplicarlo · close calls: `worktree.ts` y `delegate.ts` no están en los `Files` de T5 — es el arreglo de G1, documentado ahí
+
+## T6 — Líneas SDD en la card
+
+- [x] Done
+- **Owner**: —
+- **Component**: C4 · **Implements**: R7, E3, E6, E9
+- **Files**: `hooks/conductor/model.ts`, `hooks/conductor/card.tsx`, `types/index.d.ts`, `server/tests/card-model.spec.ts`, `tests/conductor-card.test.tsx`
+- **Do**:
+  - En `model.ts`, añadir `pipelineView(summary, running)`: hasta 3 features en `Implementación`/`Verificación`, con el formato `slug ▸ Impl 3/8 · codex T4 ⏳ · ⚠ 1`.
+  - En `card.tsx`, `loadSpec`:
+    - usa `$.mcp.connect("multi-provider")` + `$.mcp.call(server, "sdd_feature_status", {})`, y no llama si hay una llamada anterior pendiente;
+    - si falla, cae a `specProgress`/`pickActiveSpec`.
+  - `running` guarda el `taskId` del argumento de `sdd_task_delegate` capturado en `tool.call`.
+  - El átomo `spec` pasa a contener la lista.
+- **Acceptance**:
+  - con 4 features activas se muestran 3;
+  - con una delegación viva aparecen proveedor y tarea;
+  - con avisos aparece `⚠ N`;
+  - sin features activas no hay línea (E3);
+  - con `$.mcp.call` rechazando se dibuja la línea de `specProgress` (E6);
+  - los tests existentes de la card siguen pasando.
+- **Verify**: `npm --prefix server test -- card-model` · `claude plugin test .` · manual: `claude --plugin-dir .` en este repo muestra `sdd-task-delegation ▸ Verif …`
+- **Notes**: Hecha por Claude en la sesión principal. En `model.ts`: `pipelineView` (hasta 3 features en Impl/Verif; si la línea pasa de 44 columnas acorta el slug y conserva etapa, tarea y avisos) y `ownerProvider`. En `card.tsx`: `loadSpec` llama a `sdd_feature_status` vía `$.mcp.connect`/`$.mcp.call`, sin llamar si hay una pendiente, y cae a `specProgress` si el servidor no responde. El hook `tool.call` ahora también escucha `sdd_task_delegate` (`markSddStart`, con el proveedor tomado del Owner): arregla que la card no mostrara esas llamadas. El átomo `spec` es `SpecView` en `types/index.d.ts`. Tests: 4 casos en `card-model.spec.ts` y 2 en `conductor-card.test.tsx` (pipeline del servidor y fallback). Gates: typecheck 0 errores, 236 passed, plugin validate ok, plugin test 11 pass. Pendiente manual: la tarea en vivo durante un `sdd_task_delegate` real con `claude --plugin-dir .`, porque el harness de tests no atiende `$.tool.call` de una herramienta MCP; la lógica la cubre `pipelineView` con `running`. Clean-code: el slug se acorta en `pipelineView` en lugar de un `slice` en la card, que cortaba el número del aviso · close calls: none
+
+## T7 — Document the feature
+
+- [x] Done
+- **Owner**: —
+- **Component**: C6 · **Implements**: all (documentation)
+- **Files**: `docs/sdd-traceability.md`, `README.md`, `skills/multi-provider/SKILL.md`
+- **Do**:
+  - Escribir `docs/sdd-traceability.md`: etapas, avisos, formato de la respuesta, campo `sdd` del audit y cabecera de usage.
+  - En el README: `/sdd-status` en la tabla de comandos, la herramienta y lo nuevo de la card.
+  - En el skill: consultar `sdd_feature_status` antes de `/sdd-delegate`.
+- **Acceptance**: La doc describe el comportamiento real; cada ejemplo coincide con el esquema registrado en `index.ts`.
+- **Verify**: comparar cada ejemplo con `server/src/index.ts` y ejecutar `/sdd-status` en este repo (SC1)
+- **Notes**: Hecha por Claude en la sesión principal. `docs/sdd-traceability.md` (uso, interfaz de `/sdd-status` y `sdd_feature_status`, tabla de etapas y de avisos, campo `sdd`, card, notas y señal). En el README: `/sdd-status` en Uso, sección "Pipeline SDD", fila de la herramienta, sesión y spec-driven de la card, `pipeline.ts` en Estructura. En `skills/multi-provider/SKILL.md`, consultar `sdd_feature_status` antes de elegir tarea. Los ejemplos se cotejaron con el esquema de `server/src/index.ts`. SC1 se ejecutó con `server/dist` contra este repo, porque el servidor de esta sesión es el 0.1.1 de la caché y aún no tiene la herramienta. Clean-code: none · close calls: none
+
+---
+
+## Gaps found in verification
+
+- **G1** (resuelto en T5) — `orphan_claim` marca como huérfana una tarea cuya delegación sigue en curso, porque `state.json` solo registra una delegación al terminar (visto con T3 corriendo). Se corrige en T5: la herramienta considera también los worktrees `mp/*` vivos de esa tarea.
+- **G2** — `server/tests/statusline.spec.ts` ("shows not installed / no auth in red") falla cuando el entorno tiene `NO_COLOR`, porque `statusline/index.js` decide el color al cargar el módulo. Hace que el gate Tests de cada delegación salga "NEW FAILURE". Fuera del alcance de esta feature: el test debe fijar `NO_COLOR` antes de importar.
+- **G3** — El brief de `sdd_task_delegate` muestra `Do: —` cuando el `**Do**` de la tarea es una lista con viñetas en las líneas siguientes (visto con T3): `parseTasks` en `server/src/sdd/artifacts.ts` solo lee el texto de la misma línea. Fuera del alcance de esta feature (`sdd-task-delegation`).
+
+---
+
+## Verification reports
+
+### Verification report — sdd-traceability — 2026-10-18 — pass 1
+
+Change set: `main@648bc57...HEAD` (`feature/sdd-traceability`)
+Converged: yes — R7 (tarea en vivo durante un `sdd_task_delegate` real) y SC3 (comparación con `/usage`) quedan como comprobación manual en la máquina del usuario con `claude --plugin-dir .`
+
+| Req | Verdict | Evidence (case · assertion · clause) |
+|---|---|---|
+| R1 | met | `sdd-pipeline.spec.ts::"R1/R8/E10/E11…"` — Status por artefacto, conteos por casilla, openList con owners, último reporte con veredictos; runner: `17 passed` |
+| R2 | met | `sdd-pipeline.spec.ts::"R2/R3: stage precedence case %#"` (10 casos) y `"R2/E8…"`; contra este repo, `sdd-task-delegation` → `Verificación · pass 1 no convergido` |
+| R3 | met | mismos 10 casos verifican `nextStep`; `pending` del reporte llega al siguiente paso (`"…converger (awaiting the user's decision on R10/SC1"`) |
+| R4 | met | `sdd-pipeline.spec.ts::"R4/E7…"` cubre `violations`, `scope_mismatch`, `orphan_claim`, `closed_with_open_tasks`, `ready_to_close`; `"G1…"` cubre el worktree vivo |
+| R5 | met | `delegate.spec.ts::"R5: normal delegate does not record sdd…"` y `sdd-task-delegation.spec.ts::"R5: sdd_task_delegate records sdd…"` — audit y `recent[0]` con `{ slug, taskId }`, sin `sdd` en `delegate` normal |
+| R6 | met | `sdd-pipeline.spec.ts::"R6/E3: the tool lists a summary per feature…"`; `sdd_feature_status` en `server/src/index.ts`; `commands/sdd-status.md` pasa `claude plugin validate .` |
+| R7 | partially met | `card-model.spec.ts::"R7: at most 3 features…"` y `"R7: a long line shortens the slug…"`; `conductor-card.test.tsx::"SDD lines from the server pipeline"`. La tarea en vivo vía el hook de `sdd_task_delegate` no se ejercita en el harness (no atiende `$.tool.call` de una herramienta MCP) |
+| R8 | met | `sdd-pipeline.spec.ts::"R1/R8…"` — `specs/` idéntico antes y después, dos llamadas con el mismo JSON |
+| R9 | met | `card-model.spec.ts::"R9: labels, bar, percent and time to reset"`, `"R9: warn from 80%, error from 95%"`; `conductor-card.test.tsx::"Claude Code usage…"` en panel y bandas |
+| E1 | met | `"E1/E2/E4…"` — `Available features: bad, demo, draft, unreadable` |
+| E2 | met | `"E1/E2/E4…"` — `Desconocida` + `malformed` nombrando el archivo, las demás se calculan |
+| E3 | met | `"R6/E3…"` — `no SDD features`; `card-model.spec.ts::"E3…"` sin líneas |
+| E4 | met | `"E1/E2/E4…"` y `"lists by scope rank…"` — `scope-only` no aparece y ordena |
+| E5 | met | `"E5: Small skips Plan/Tasks…"` |
+| E6 | met | `"E6: absent/corrupt state…"`; `conductor-card.test.tsx::"SDD line falls back to tasks.md…"` |
+| E7 | met | `"R4/E7…"` — T99 ignorada |
+| E8 | met | `"R2/E8…"` y `sdd-artifacts.spec.ts::"A4/E8…"` |
+| E9 | met | `"lists by scope rank then name… 50 features"` — < 1000 ms |
+| E10 | met | `sdd-artifacts.spec.ts::"E10…"`; owners con ñ y acentos en `"E5…"` |
+| E11 | met | `"R1/R8/E10/E11…"` y `"R4/E7…"` — sin cuerpos de tareas, rutas ni detalles de violaciones |
+| E12 | met | `card-model.spec.ts::"E12…"`; `conductor-card.test.tsx::"usage — when no window has a reading yet"` |
+| E13 | met | `card-model.spec.ts::"E13…"` — `gasto ▮▮▮▮▮▮ 112%`, sin `resetsAt` |
+| E14 | partially met | el código pone las ventanas en línea propia cuando la card es angosta; el test comprueba el texto en los tres sitios pero no la estructura de línea |
+
+Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 18 passed (18) · Tests 236 passed (236)` (baseline 200 passed (200); +36 nuevos, 0 omitidos) · `claude plugin validate .` ✅ · `claude plugin test .` ✅ `11 pass, 0 fail` (baseline 7) · Dist ✅ `git diff --exit-code -- server/dist` vacío tras el build · CI multiplataforma: pendiente (sin PR; merge local)
+Dead-code sweep: `tsc --noUnusedLocals --noUnusedParameters` sin hallazgos
+Success criteria: SC1 met — `sddFeatureStatus` sobre este repo da `sdd-guardrails` Cerrada y `sdd-task-delegation` `Verificación · pass 1 no convergido` con la decisión R10/SC1 en el siguiente paso · SC2 met on emission (R5) · SC3 pending — manual
+Attribution: none
+Shortcuts declared: none

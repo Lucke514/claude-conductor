@@ -6,12 +6,13 @@ import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { delegate } from "./delegate.js";
 import { SddError } from "./sdd/artifacts.js";
+import { sddFeatureStatus } from "./sdd/pipeline.js";
 import { sddTaskClaim, sddTaskDelegate, sddTaskRelease } from "./sdd/task-delegation.js";
 import { checkHealth } from "./health.js";
 import { StateStore } from "./state.js";
 import { applyWorktree, cleanupWorktrees, readMeta, removeWorktree } from "./worktree.js";
 
-const VERSION = "0.1.1";
+const VERSION = "0.2.0";
 
 export function projectDir(): string {
   const env = process.env.MP_PROJECT_DIR ?? process.env.CLAUDE_PROJECT_DIR;
@@ -222,6 +223,23 @@ export function createServer(): McpServer {
     async (args) => {
       try {
         return json(await sddTaskRelease(args, { projectDir: projectDir() }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "sdd_feature_status",
+    {
+      title: "Spec-driven pipeline status",
+      description:
+        "Read-only. Without slug: every feature under specs/ with its stage (Spec → Plan → Tasks → Implementación → Verificación → Cerrada), task progress, warning count and next step. With slug: that feature in full (Status of each artifact, open tasks and owners, last verification report, warnings, next step). Never writes anything; the next step is a suggestion.",
+      inputSchema: { slug: z.string().min(1).optional().describe("Feature slug: the folder under specs/; omit for every feature") },
+    },
+    async (args) => {
+      try {
+        return json(await sddFeatureStatus(args, { projectDir: projectDir() }));
       } catch (err) {
         return fail(err);
       }

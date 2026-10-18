@@ -60,6 +60,9 @@ export interface Running {
   mode: string;
   task: string;
   startedAt: number;
+  /** Set for sdd_task_delegate: the feature and task being worked on. */
+  slug?: string;
+  taskId?: string;
 }
 
 export interface SessionTally {
@@ -412,6 +415,53 @@ export function specProgress(slug: string, md: string): SpecProgress {
   return progress;
 }
 
+/** One feature as the sdd_feature_status tool summarizes it. */
+export interface PipelineFeature {
+  slug: string;
+  stage: string;
+  substage?: string;
+  closed: number;
+  total: number;
+  current?: { id: string; owner: string | null };
+  warnings: number;
+  nextStep: string;
+}
+
+export interface PipelineLine {
+  slug: string;
+  /** "sdd-traceability ▸ Impl 3/8 · codex T4 ⏳ · ⚠ 1" */
+  text: string;
+  running: boolean;
+  warn: boolean;
+}
+
+const STAGE_SHORT: Record<string, string> = { "Implementación": "Impl", "Verificación": "Verif" };
+
+/**
+ * Features in implementation or verification, at most `max`, with the live delegation and warnings.
+ * A line longer than `width` shortens the slug, never the stage, the task or the warning count.
+ */
+export function pipelineView(features: PipelineFeature[], running?: Running | null, max = 3, width = 44): PipelineLine[] {
+  return features
+    .filter((f) => STAGE_SHORT[f.stage])
+    .slice(0, max)
+    .map((f) => {
+      const live = running?.taskId && running.slug === f.slug ? `${SHORT[running.provider] ?? running.provider} ${running.taskId} ⏳` : undefined;
+      const parts = [`▸ ${STAGE_SHORT[f.stage]} ${f.closed}/${f.total}`];
+      if (live) parts.push(live);
+      if (f.warnings > 0) parts.push(`⚠ ${f.warnings}`);
+      const rest = parts.join(" · ");
+      const room = Math.max(4, width - rest.length - 1);
+      const slug = f.slug.length > room ? `${f.slug.slice(0, room - 1)}…` : f.slug;
+      return { slug: f.slug, text: `${slug} ${rest}`, running: !!live, warn: f.warnings > 0 };
+    });
+}
+
+/** The worker a task's Owner names ("codex (multi-provider) since …" → "codex"). */
+export function ownerProvider(owner: string | null | undefined): string | undefined {
+  return owner?.match(/^(codex|antigravity|agy)\b/i)?.[1]?.toLowerCase();
+}
+
 /** The feature being worked on: one with a claimed task, else an approved one with open tasks. */
 export function pickActiveSpec(specs: SpecProgress[]): SpecProgress | undefined {
   return (
@@ -440,6 +490,43 @@ export function ctxBar(percent: number | undefined, width = 10): string {
   const p = Math.max(0, Math.min(100, percent ?? 0));
   const filled = Math.round((p / 100) * width);
   return "━".repeat(filled) + "─".repeat(width - filled);
+}
+
+/** A rate-limit window as `$.session.usage()` reports it. */
+export interface RateLimitReading {
+  kind: string;
+  percentUsed: number;
+  resetsAt?: string;
+}
+
+export interface RateLimitView {
+  label: string;
+  bar: string;
+  percent: string;
+  /** Time until the window resets; absent without `resetsAt`. */
+  resetIn?: string;
+  tone: Tone;
+}
+
+const LIMIT_LABEL: Record<string, string> = { five_hour: "5h", seven_day: "7d", spend_limit: "gasto" };
+
+/** Each window as "5h ▮▮▮▯▯▯ 42% · 2h10m": warn from 80%, error from 95%. */
+export function rateLimitView(limits: RateLimitReading[] | undefined, now: number): RateLimitView[] {
+  return (limits ?? []).map((l) => {
+    const view: RateLimitView = {
+      label: LIMIT_LABEL[l.kind] ?? l.kind,
+      bar: bar(l.percentUsed, 100, 6),
+      percent: `${l.percentUsed}%`,
+      tone: l.percentUsed >= 95 ? "error" : l.percentUsed >= 80 ? "warn" : "text",
+    };
+    const resetsAt = l.resetsAt ? Date.parse(l.resetsAt) : NaN;
+    if (Number.isFinite(resetsAt)) view.resetIn = fmtDuration(resetsAt - now);
+    return view;
+  });
+}
+
+export function rateLimitText(v: RateLimitView): string {
+  return `${v.label} ${v.bar} ${v.percent}${v.resetIn ? ` · ${v.resetIn}` : ""}`;
 }
 
 /** "claude-sonnet-5-5[1m]" → "Sonnet 5.5"; anything else is shown as given. */

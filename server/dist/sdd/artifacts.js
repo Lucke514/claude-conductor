@@ -134,6 +134,69 @@ export function parseGates(text) {
     }
     return gates;
 }
+/** Reports in document order, restricted to the Verification reports section. */
+export function parseVerificationReports(md) {
+    const lines = normalize(md).split("\n");
+    const start = lines.findIndex((line) => /^## Verification reports\s*$/.test(line));
+    if (start < 0)
+        return [];
+    const reports = [];
+    for (let i = start + 1; i < lines.length; i++) {
+        if (/^#{1,2} /.test(lines[i]))
+            break;
+        const heading = /^### Verification report — .+ — pass (\d+)\s*$/.exec(lines[i]);
+        if (!heading)
+            continue;
+        const block = [];
+        while (i + 1 < lines.length && !/^#{1,3} /.test(lines[i + 1]))
+            block.push(lines[++i]);
+        const converged = /^Converged:[ \t]*(yes|no)\b(?:[ \t]*—[ \t]*(.+))?/m.exec(block.join("\n"));
+        const counts = new Map();
+        const table = block.findIndex((line) => line.trim().startsWith("|") && cells(line).includes("Verdict"));
+        if (table >= 0) {
+            const column = cells(block[table]).indexOf("Verdict");
+            for (let j = table + 2; j < block.length && block[j].trim().startsWith("|"); j++) {
+                const verdict = cells(block[j])[column];
+                if (verdict)
+                    counts.set(verdict, (counts.get(verdict) ?? 0) + 1);
+            }
+        }
+        // fromEntries defines own properties, so a verdict named "__proto__" stays a plain key.
+        const verdicts = Object.fromEntries(counts);
+        const report = { pass: Number(heading[1]), converged: converged ? converged[1] === "yes" : null, verdicts };
+        if (converged?.[1] === "no" && converged[2])
+            report.pending = converged[2].trim();
+        reports.push(report);
+    }
+    return reports;
+}
+/** Read the Slug table; keep Status text verbatim and rank numeric. */
+export function parseScope(md) {
+    const lines = normalize(md).split("\n");
+    const start = lines.findIndex((line) => /^\|\s*Slug\s*\|/.test(line) && cells(line).includes("Rank") && cells(line).includes("Status"));
+    if (start < 0)
+        return [];
+    const head = cells(lines[start]);
+    const rows = [];
+    for (let i = start + 2; i < lines.length && lines[i].trim().startsWith("|"); i++) {
+        const row = cells(lines[i]);
+        const slug = row[head.indexOf("Slug")];
+        const rank = row[head.indexOf("Rank")];
+        const status = row[head.indexOf("Status")];
+        if (slug && SLUG.test(slug) && rank && /^\d+$/.test(rank) && status)
+            rows.push({ slug, rank: Number(rank), status });
+    }
+    return rows;
+}
+/** Missing or unreadable files remain undefined; never invent a draft Status. */
+export async function readFeatureArtifacts(projectDir, slug) {
+    if (!SLUG.test(slug))
+        throw new SddError("INVALID_SLUG", `invalid feature slug '${slug}'`);
+    const dir = path.join(projectDir, "specs", slug);
+    const [spec, plan, tasks] = await Promise.all(["spec.md", "plan.md", "tasks.md"].map((name) => readText(path.join(dir, name))));
+    const small = tasks === undefined && plan === undefined && spec !== undefined && /^## Tasks\b/m.test(spec);
+    return { spec, plan, tasks, depth: small ? "small" : "standard" };
+}
 async function readText(file) {
     try {
         return normalize(await fs.readFile(file, "utf8"));
@@ -167,13 +230,8 @@ function smallTasksSection(spec) {
 }
 /** Load a feature's artifacts (E1: unknown slug lists the available ones; E7: Small spec). */
 export async function loadFeature(projectDir, slug) {
-    if (!SLUG.test(slug))
-        throw new SddError("INVALID_SLUG", `invalid feature slug '${slug}'`);
-    const dir = path.join(projectDir, "specs", slug);
-    const spec = await readText(path.join(dir, "spec.md"));
-    const plan = await readText(path.join(dir, "plan.md"));
-    const tasks = await readText(path.join(dir, "tasks.md"));
-    const small = tasks === undefined && plan === undefined && spec !== undefined && /^## Tasks\b/m.test(spec);
+    const { spec, plan, tasks, depth } = await readFeatureArtifacts(projectDir, slug);
+    const small = depth === "small";
     if (spec === undefined || (tasks === undefined && !small)) {
         const slugs = await listSlugs(projectDir);
         throw new SddError("FEATURE_NOT_FOUND", `feature '${slug}' has no ${spec === undefined ? "specs/" + slug + "/spec.md" : "tasks.md"}. ` +

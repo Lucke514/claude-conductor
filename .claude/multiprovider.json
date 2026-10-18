@@ -1,0 +1,10 @@
+{
+  "isolation": {
+    "symlink": ["server/node_modules"]
+  },
+  "providers": {
+    "antigravity": {
+      "writeModeArgs": ["--dangerously-skip-permissions"]
+    }
+  }
+}

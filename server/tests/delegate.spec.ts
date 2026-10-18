@@ -53,11 +53,13 @@ describe("delegate (integration with fake CLIs)", () => {
     expect(state.sessions["test-instance"]?.providers.codex?.calls).toBe(1);
     // Conductor card data: recent delegations and per-provider call history.
     expect(state.recent?.[0]).toMatchObject({ id: r.id, provider: "codex", mode: "read", status: "success", task: "review index.ts" });
+    expect(state.recent?.[0]?.sdd).toBeUndefined();
     expect(state.providers.codex?.history).toHaveLength(1);
     expect(state.providers.codex?.history?.[0]).toMatchObject({ ok: true, tokens: 1500 });
     const log = readdirSync(logsDir()).map((f) => readFileSync(path.join(logsDir(), f), "utf8")).join("");
     const entry = log.trim().split("\n").map((l) => JSON.parse(l)).find((e) => e.id === r.id);
     expect(entry).toMatchObject({ provider: "codex", status: "success", mode: "read" });
+    expect(entry.sdd).toBeUndefined();
     expect(entry.promptSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(entry)).not.toContain("export const a");
   });
@@ -89,6 +91,7 @@ describe("delegate (integration with fake CLIs)", () => {
     const c = ctx(repo);
     const r = await delegate({ provider: "codex", task: "add a file", mode: "write" }, c);
     expect(r.status).toBe("success");
+    expect((await c.store.read()).recent?.[0]?.violations?.[0]?.type).toBe(r.violations?.[0]?.type);
     expect(r.violations?.[0]?.type).toBe("worker_commit");
     expect(r.diff).toContain("+hello from worker");
     const meta = await readMeta(r.worktreePath!);
@@ -201,6 +204,34 @@ describe("delegate (integration with fake CLIs)", () => {
     delete process.env.FAKE_ARGS_FILE;
     expect(JSON.parse(readFileSync(argsFile, "utf8"))).toContain("my-model");
     expect(FAKE_CODEX).toBeTruthy();
+  });
+
+  it("R5: normal delegate does not record sdd; when sdd is provided, only slug and taskId are recorded", async () => {
+    const repo = makeRepo();
+    const c = ctx(repo);
+    const r1 = await delegate({ provider: "codex", task: "first normal" }, c);
+    const state1 = await c.store.read();
+    expect(state1.recent?.[0]?.sdd).toBeUndefined();
+
+    const r2 = await delegate(
+      {
+        provider: "codex",
+        task: "with sdd",
+        sdd: Object.assign({ slug: "demo", taskId: "T1" }, { extra: "ignored" }),
+      },
+      c,
+    );
+    const state2 = await c.store.read();
+    expect(state2.recent?.[0]?.sdd).toEqual({ slug: "demo", taskId: "T1" });
+    expect(Object.keys(state2.recent?.[0]?.sdd ?? {})).toEqual(["slug", "taskId"]);
+
+    const log = readdirSync(logsDir()).map((f) => readFileSync(path.join(logsDir(), f), "utf8")).join("");
+    const lines = log.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const entry1 = lines.find((e) => e.id === r1.id);
+    const entry2 = lines.find((e) => e.id === r2.id);
+    expect(entry1?.sdd).toBeUndefined();
+    expect(entry2?.sdd).toEqual({ slug: "demo", taskId: "T1" });
+    expect(Object.keys(entry2?.sdd ?? {})).toEqual(["slug", "taskId"]);
   });
 });
 

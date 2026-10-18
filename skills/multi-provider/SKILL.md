@@ -46,6 +46,8 @@ Claude Code is always the **orchestrator and supervisor**. Workers (Codex via `c
 
 When the work is a task of a spec-driven feature (`specs/<slug>/tasks.md` with approved spec, plan and tasks), use `/sdd-delegate <slug> <T#|next>` instead of writing a brief by hand: `sdd_task_claim` writes the task's `**Owner**`, you commit that claim, and `sdd_task_delegate` builds the brief from the artifacts, runs the task's `Verify` and the plan's gates in the worktree, and returns per-criterion verdicts plus a `Notes` draft. On discard, `sdd_task_release` hands the task back. Ticking the box and writing `Notes` stay yours, after your own review.
 
+Before picking a task, or when asked where a feature stands, call `sdd_feature_status` (or `/sdd-status`). It returns each feature's stage, open tasks and owners, the last verification report and warnings such as `orphan_claim` or `ready_to_close`, all read from the artifacts. Its `nextStep` is a suggestion: never act on it without the user.
+
 ## Hard rules
 
 - Workers never commit, push or open PRs (a hook blocks commits; any worker commit is undone with `git reset --soft` and logged as a violation).
