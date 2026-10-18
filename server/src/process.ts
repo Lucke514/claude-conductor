@@ -102,6 +102,9 @@ export function resolveCommand(bin: string): ResolvedCommand | undefined {
     // Unknown batch file: run through cmd.exe with escaped arguments (no interpolation).
     return { command: process.env.ComSpec ?? "cmd.exe", prefixArgs: ["/d", "/s", "/c", found], resolvedPath: found };
   }
+  // A plain JS entry point (e.g. binaryPath pointing at a CLI's .js file): run it with
+  // the current node, since Windows cannot spawn a script through its shebang.
+  if (/\.(c|m)?js$/i.test(found)) return { command: process.execPath, prefixArgs: [found], resolvedPath: found };
   return { command: found, prefixArgs: [], resolvedPath: found };
 }
 
@@ -201,6 +204,11 @@ async function loadPty(): Promise<PtyModule | null> {
     ptyModule = null;
   }
   return ptyModule;
+}
+
+/** True when node-pty can be loaded (Antigravity needs it to avoid hanging without a TTY). */
+export async function ptyAvailable(): Promise<boolean> {
+  return (await loadPty()) !== null;
 }
 
 export async function runProcess(opts: RunOptions): Promise<RunResult> {

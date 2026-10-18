@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
 import { loadConfig } from "./config.js";
+import { formatDoctor, runDoctor } from "./doctor.js";
 import { checkHealth } from "./health.js";
 import { postDelegate, preBash, preDelegate, sessionStart, userPromptSubmit, type HookInput } from "./hooks.js";
 import { stripAttribution } from "./sanitize.js";
@@ -18,6 +19,7 @@ import { StateStore } from "./state.js";
  *   cli.js git-hooks <install|uninstall>
  *   cli.js clean-commit-msg <file>
  *   cli.js status
+ *   cli.js doctor [--no-live] [--json]
  */
 
 async function readStdin(): Promise<string> {
@@ -125,8 +127,13 @@ async function main(argv: string[]): Promise<number> {
       process.stdout.write(`${JSON.stringify(await checkHealth(config, new StateStore()), null, 2)}\n`);
       return 0;
     }
+    case "doctor": {
+      const report = await runDoctor({ projectDir: projectDir(), store: new StateStore(), live: !flag(rest, "--no-live") });
+      process.stdout.write(`${flag(rest, "--json") ? JSON.stringify(report, null, 2) : formatDoctor(report)}\n`);
+      return report.ok ? 0 : 3;
+    }
     default:
-      process.stderr.write("usage: cli.js hook|setup|statusline-mode|auto-delegate|git-hooks|clean-commit-msg|status\n");
+      process.stderr.write("usage: cli.js hook|setup|statusline-mode|auto-delegate|git-hooks|clean-commit-msg|status|doctor\n");
       return 2;
   }
 }
