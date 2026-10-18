@@ -114,7 +114,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 ## T6 — Líneas SDD en la card
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C4 · **Implements**: R7, E3, E6, E9
 - **Files**: `hooks/conductor/model.ts`, `hooks/conductor/card.tsx`, `types/index.d.ts`, `server/tests/card-model.spec.ts`, `tests/conductor-card.test.tsx`
 - **Do**:
