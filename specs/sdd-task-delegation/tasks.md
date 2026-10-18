@@ -87,14 +87,14 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 
 ## T8 — Document the feature
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: — · **Implements**: all (documentation)
 - **Files**: `docs/sdd-task-delegation.md`, `README.md`
 - **Do**: Escribir `docs/sdd-task-delegation.md` (flujo, herramientas, respuesta, límites: E3, comparación con baseline, Owner con fallback); sección en el README con `/sdd-delegate` y las tres herramientas.
 - **Acceptance**: La doc describe el comportamiento real; cada ejemplo de invocación coincide con los esquemas registrados en `index.ts`.
 - **Verify**: comparar cada ejemplo con `server/src/index.ts` y ejecutar `/sdd-delegate` sobre una tarea de prueba (SC1)
-- **Notes**: —
+- **Notes**: `docs/sdd-task-delegation.md` (uso, interfaz de las tres herramientas y del comando, notas de comportamiento, señal) y README (sección `/sdd-delegate`, filas de las herramientas, estructura); ejemplos cotejados con los esquemas de `server/src/index.ts`; commit `sdd-task-delegation: T8 document the feature`. La ejecución real de `/sdd-delegate` (SC1) queda pendiente: este entorno no tiene `codex` ni `agy`. Clean-code: none · close calls: none
 
 ---
 

@@ -111,6 +111,8 @@ Comandos del plugin (también accesibles como `/multi-provider:<comando>`):
 /delegate codex Revisa src/auth/*.ts buscando condiciones de carrera
 /delegate agy --write Extrae la validación de users.service.ts a un helper con tests
 /delegate auto refactoriza el módulo de pagos para inyectar el cliente HTTP
+/sdd-delegate sdd-guardrails next codex
+/sdd-delegate sdd-guardrails T2 --read
 /providers-status
 /providers-config
 /mp-setup [user|project]
@@ -126,6 +128,17 @@ Comandos del plugin (también accesibles como `/multi-provider:<comando>`):
 `/mp-doctor` hace una comprobación end-to-end en tu máquina: versión de Node y de git, validez de la config, si `node-pty` carga, binario, versión y auth de cada CLI y, por último, una **ejecución real** de una línea ("reply OK") en modo read con el mismo adapter que usa `delegate`. Esa ejecución corre en un repo git temporal, nunca en tu proyecto, y gasta unos pocos tokens por proveedor; `--no-live` la omite. Cada fallo trae su `fix:` concreto. Es la forma rápida de detectar que una versión nueva de `codex` o `agy` cambió sus flags (lo verás como `PARSE_ERROR` o `NON_ZERO_EXIT` en la ejecución real aunque `/providers-status` salga bien).
 
 Desde la terminal: `node server/bootstrap.mjs cli doctor [--no-live] [--json]` (código de salida 0 si todo pasa y 3 si algo falla).
+
+### Tareas spec-driven (`/sdd-delegate`)
+
+Para features escritas con [spec-driven](https://github.com/Lucke514/spec-driven) (`specs/<slug>/{spec,plan,tasks}.md` aprobados), `/sdd-delegate <slug> <T#|G#|next> [codex|antigravity|auto] [--read]` delega **una tarea** de `tasks.md` con un brief construido desde los artefactos, no desde la conversación. Por defecto usa `auto` y modo write. El flujo:
+
+1. `sdd_task_claim` comprueba que spec, tasks y plan (si existe) están `approved` y que la tarea está abierta y sin owner, y escribe su `**Owner**`.
+2. Claude committea ese claim con el comando que devuelve la herramienta (solo `tasks.md`, sin trailers de atribución). Ninguna herramienta hace commits.
+3. `sdd_task_delegate` se niega a arrancar un worker si el claim no está en `HEAD`. Si lo está, delega con el texto literal de la tarea, sus `R#`/`E#` y su componente `C#`, y en write ejecuta en el worktree el `Verify` de la tarea y los gates del plan, sin shell.
+4. Aplicas (`delegation_apply`) o descartas (`delegation_discard` + `sdd_task_release`). Marcar la casilla y escribir `Notes` lo hace Claude tras su revisión.
+
+Detalle, formato de la respuesta y límites en [`docs/sdd-task-delegation.md`](docs/sdd-task-delegation.md).
 
 ### Delegación automática
 
@@ -145,6 +158,9 @@ Herramientas MCP (servidor `multi-provider`):
 | `delegation_apply` | `git apply --3way` del worktree sobre tu rama (sin commit) y limpieza |
 | `delegation_discard` | Borra el worktree y la rama `mp/*` |
 | `delegation_cleanup` | Limpia worktrees `mp/*` huérfanos |
+| `sdd_task_claim` | `{ slug, task: "T#"\|"G#"\|"next", provider? }` → escribe el `**Owner**` y devuelve el comando `commit` del claim |
+| `sdd_task_delegate` | `{ slug, task, mode?: "write"\|"read", timeoutMs? }` → la respuesta de `delegate` más `sdd: { acceptance, verification, verified, notesDraft, handback? }` |
+| `sdd_task_release` | `{ slug, task }` → `**Owner**` a `—` y el comando `commit` del handback |
 
 Los valores de `status` son `success`, `fallback_to_claude` y `failed` (este último solo si la cadena no termina en `claude`).
 
@@ -322,8 +338,10 @@ Instalación: el formato actual de plugins **no** permite declarar `statusLine` 
 agents/{codex-worker,agy-worker}.md   commands/*.md   skills/multi-provider/SKILL.md
 hooks/conductor/{card.tsx,model.ts}   types/index.d.ts   tests/conductor-card.test.tsx
 config/multiprovider.example.json     statusline/index.js   .github/workflows/ci.yml
+specs/<slug>/{spec,plan,tasks}.md     docs/*.md
 server/  bootstrap.mjs · src/{index,cli,config,delegate,fallback,circuit-breaker,health,worktree,
          prompt-builder,process,state,audit,hooks,setup,sanitize,gh-scrub,doctor}.ts · providers/{types,codex,antigravity}.ts
+         sdd/{artifacts,brief,claim,verify,task-delegation}.ts
          tests/ (vitest *.spec.ts + binarios fake) · dist/ (compilado, versionado)
 ```
 
