@@ -2,7 +2,7 @@
 
 # Spec: Guardrails de delegación
 
-> Status: approved
+> Status: implemented
 > Owner: Lucas Gonzalez Espinosa (@Lucke514)
 > Sign-off: — the session's user holds all of these
 > Tracking: — this project tracks work in the repo only
@@ -87,6 +87,7 @@ Hoy el bloqueo de commits y pushes depende de hooks que un worker puede saltarse
 - 2026-10-18 Spec aprobado por el usuario con las opciones por defecto de las cuatro preguntas abiertas.
 - 2026-10-18 Plan aprobado por el usuario.
 - 2026-10-18 Tasks aprobadas por el usuario.
+- 2026-10-18 Verificación convergida (pass 1) y fusionado en `main` (Lucke514/claude-conductor#9); SC2 queda como comprobación pendiente en la máquina del usuario.
 
 ## Open questions
 
