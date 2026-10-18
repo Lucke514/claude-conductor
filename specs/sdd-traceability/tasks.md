@@ -137,7 +137,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 ## T7 — Document the feature
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C6 · **Implements**: all (documentation)
 - **Files**: `docs/sdd-traceability.md`, `README.md`, `skills/multi-provider/SKILL.md`
 - **Do**:
