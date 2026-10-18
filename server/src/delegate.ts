@@ -6,6 +6,7 @@ import { repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
 import { PROVIDER_NAMES, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
+import { resolveRepo } from "./repo.js";
 import { recordCall, recordRecent, taskLabel, type StateStore } from "./state.js";
 import type { JobRegistry } from "./jobs.js";
 import { checkRemotePush, type PushViolation } from "./remote-check.js";
@@ -21,6 +22,8 @@ export interface DelegateParams {
   model?: string;
   taskType?: string;
   fallback?: boolean;
+  /** Code repository to work on, relative to the project (a nested repo); default: the project's own repo. */
+  repo?: string;
   /** Files the task may change (an entry ending in `/` covers a directory); anything else is reported as drift. */
   scopeFiles?: string[];
   /** Extra "Expected output" lines for the worker (e.g. the SDD Acceptance section). */
@@ -38,6 +41,8 @@ export interface DelegateResponse {
   model: string | null;
   status: DelegateStatus;
   mode: Mode;
+  /** The `repo` the delegation worked on (relative to the project), when one was given. */
+  repo?: string;
   output: string;
   diff?: string;
   diffTruncated?: boolean;
@@ -99,6 +104,9 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
   const mode: Mode = params.mode ?? config.defaults.mode;
   const timeoutMs = params.timeoutMs ?? (mode === "write" ? config.defaults.writeTimeoutMs : config.defaults.timeoutMs);
   const sessionKey = params.sessionId ?? ctx.instanceId;
+  // R1: an invalid repo fails before any job, worktree or worker exists.
+  const target = params.repo ? await resolveRepo(ctx.projectDir, params.repo) : undefined;
+  const codeDir = target?.root ?? ctx.projectDir;
   // The job's controller follows the MCP request's signal and delegation_cancel alike.
   const signal = ctx.jobs
     ? ctx.jobs.start({ id, provider: null, mode, task: taskLabel(params.task), ...(params.sdd ? { sdd: params.sdd } : {}) }, ctx.signal).signal
@@ -114,8 +122,8 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     const built = await buildPrompt({
       task: params.task,
       mode,
-      files: params.files ?? [],
-      projectDir: ctx.projectDir,
+      files: (params.files ?? []).map((f) => (target && f.replace(/\\/g, "/").startsWith(`${target.rel}/`) ? f.slice(target.rel.length + 1) : f)),
+      projectDir: codeDir,
       maxFileBytes: config.defaults.maxFileBytes,
       maxTotalBytes: config.defaults.maxTotalBytes,
       ...(params.extraOutput ? { extraOutput: params.extraOutput } : {}),
@@ -134,7 +142,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     const notes: string[] = [];
     let kept: { meta: WorktreeMeta; changes: Changes } | undefined;
 
-    const repoRoot = await repoRootOf(ctx.projectDir);
+    const repoRoot = target?.root ?? (await repoRootOf(ctx.projectDir));
     const isolate = mode === "write" || config.isolation.readMode === "worktree";
     if (mode === "write" && !repoRoot) {
       return finish({
@@ -156,7 +164,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
           cwd: repoRoot,
           provider,
           includeUncommitted: config.isolation.includeUncommitted,
-          symlink: config.isolation.symlink,
+          symlink: (target && config.isolation.symlinkByRepo[target.rel]) || config.isolation.symlink,
           ...(params.sdd ? { sdd: params.sdd } : {}),
         });
       }
@@ -166,7 +174,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
       try {
         result = await adapter.run({
           prompt: built.prompt,
-          cwd: meta?.path ?? ctx.projectDir,
+          cwd: meta?.path ?? codeDir,
           mode,
           timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
           ...(model ? { model } : {}),
@@ -262,6 +270,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
       const response: DelegateResponse = {
         id,
         mode,
+        ...(target ? { repo: target.rel } : {}),
         files: built.files,
         durationMs: Date.now() - started,
         nextSteps: [],

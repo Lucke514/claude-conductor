@@ -5,6 +5,7 @@ import { repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt } from "./prompt-builder.js";
 import { PROVIDER_NAMES } from "./providers/types.js";
+import { resolveRepo } from "./repo.js";
 import { recordCall, recordRecent, taskLabel } from "./state.js";
 import { checkRemotePush } from "./remote-check.js";
 import { ensureShims, workerEnv } from "./worker-env.js";
@@ -29,6 +30,9 @@ export async function delegate(params, ctx) {
     const mode = params.mode ?? config.defaults.mode;
     const timeoutMs = params.timeoutMs ?? (mode === "write" ? config.defaults.writeTimeoutMs : config.defaults.timeoutMs);
     const sessionKey = params.sessionId ?? ctx.instanceId;
+    // R1: an invalid repo fails before any job, worktree or worker exists.
+    const target = params.repo ? await resolveRepo(ctx.projectDir, params.repo) : undefined;
+    const codeDir = target?.root ?? ctx.projectDir;
     // The job's controller follows the MCP request's signal and delegation_cancel alike.
     const signal = ctx.jobs
         ? ctx.jobs.start({ id, provider: null, mode, task: taskLabel(params.task), ...(params.sdd ? { sdd: params.sdd } : {}) }, ctx.signal).signal
@@ -43,8 +47,8 @@ export async function delegate(params, ctx) {
         const built = await buildPrompt({
             task: params.task,
             mode,
-            files: params.files ?? [],
-            projectDir: ctx.projectDir,
+            files: (params.files ?? []).map((f) => (target && f.replace(/\\/g, "/").startsWith(`${target.rel}/`) ? f.slice(target.rel.length + 1) : f)),
+            projectDir: codeDir,
             maxFileBytes: config.defaults.maxFileBytes,
             maxTotalBytes: config.defaults.maxTotalBytes,
             ...(params.extraOutput ? { extraOutput: params.extraOutput } : {}),
@@ -60,7 +64,7 @@ export async function delegate(params, ctx) {
         const violations = [];
         const notes = [];
         let kept;
-        const repoRoot = await repoRootOf(ctx.projectDir);
+        const repoRoot = target?.root ?? (await repoRootOf(ctx.projectDir));
         const isolate = mode === "write" || config.isolation.readMode === "worktree";
         if (mode === "write" && !repoRoot) {
             return finish({
@@ -81,7 +85,7 @@ export async function delegate(params, ctx) {
                     cwd: repoRoot,
                     provider,
                     includeUncommitted: config.isolation.includeUncommitted,
-                    symlink: config.isolation.symlink,
+                    symlink: (target && config.isolation.symlinkByRepo[target.rel]) || config.isolation.symlink,
                     ...(params.sdd ? { sdd: params.sdd } : {}),
                 });
             }
@@ -91,7 +95,7 @@ export async function delegate(params, ctx) {
             try {
                 result = await adapter.run({
                     prompt: built.prompt,
-                    cwd: meta?.path ?? ctx.projectDir,
+                    cwd: meta?.path ?? codeDir,
                     mode,
                     timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
                     ...(model ? { model } : {}),
@@ -186,6 +190,7 @@ export async function delegate(params, ctx) {
             const response = {
                 id,
                 mode,
+                ...(target ? { repo: target.rel } : {}),
                 files: built.files,
                 durationMs: Date.now() - started,
                 nextSteps: [],

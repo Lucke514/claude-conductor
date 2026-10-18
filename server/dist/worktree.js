@@ -24,7 +24,7 @@ export async function createWorktree(opts) {
     if (!repoRoot)
         throw new Error(`not a git repository: ${opts.cwd}`);
     const head = await gitOk(["rev-parse", "--verify", "HEAD"], repoRoot).catch(() => {
-        throw new Error("repository has no commits yet; make an initial commit before delegating");
+        throw new Error(`repository ${path.basename(repoRoot)} has no commits yet; make an initial commit before delegating`);
     });
     let base = head;
     if (opts.includeUncommitted) {
@@ -94,7 +94,7 @@ export async function readMeta(worktreePath) {
  * Canonical form for comparing paths: resolves symlinks (macOS lists /var as /private/var)
  * and Windows 8.3 short names (RUNNER~1 vs runneradmin) the way `git worktree list` prints them.
  */
-function realOrResolved(p) {
+export function realOrResolved(p) {
     try {
         return realpathSync.native(p);
     }

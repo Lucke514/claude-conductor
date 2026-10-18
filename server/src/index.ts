@@ -5,6 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { delegate } from "./delegate.js";
+import { RepoError } from "./repo.js";
 import { SddError } from "./sdd/artifacts.js";
 import { sddFeatureStatus } from "./sdd/pipeline.js";
 import { sddTaskClaim, sddTaskDelegate, sddTaskRelease } from "./sdd/task-delegation.js";
@@ -27,7 +28,7 @@ const fail = (err: unknown) => ({
   content: [
     {
       type: "text" as const,
-      text: JSON.stringify({ status: "error", error: (err as Error).message ?? String(err), ...(err instanceof SddError ? { code: err.code } : {}) }),
+      text: JSON.stringify({ status: "error", error: (err as Error).message ?? String(err), ...(err instanceof SddError || err instanceof RepoError ? { code: err.code } : {}) }),
     },
   ],
 });
@@ -53,7 +54,12 @@ export function createServer(): McpServer {
       inputSchema: {
         provider: z.enum(["codex", "antigravity", "auto"]).describe("Provider, or 'auto' to route by task type"),
         task: z.string().min(1).describe("Complete, self-contained task description"),
-        files: z.array(z.string()).optional().describe("Relevant file paths (relative to the project) to embed in the prompt"),
+        files: z.array(z.string()).optional().describe("Relevant file paths (relative to the project, or to `repo` when given) to embed in the prompt"),
+        repo: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Code repository to work on, relative to the project (e.g. a nested repo 'backend-monolith'). The worker's worktree is created from it; default: the project's repo"),
         mode: z.enum(["read", "write"]).optional().describe("read (default) or write"),
         timeoutMs: z.number().int().positive().optional(),
         model: z.string().optional().describe("Model for the explicitly requested provider"),

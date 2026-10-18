@@ -78,6 +78,8 @@ export const ConfigSchema = z.object({
       includeUncommitted: z.boolean().default(true),
       /** Directories symlinked from the repo into each worktree (e.g. node_modules). */
       symlink: z.array(z.string()).default([]),
+      /** Per-repo `symlink` for delegations with `repo` (key: the repo path relative to the project). */
+      symlinkByRepo: z.record(z.string(), z.array(z.string())).default({}),
     })
     .prefault({}),
   verify: z

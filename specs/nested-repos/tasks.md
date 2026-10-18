@@ -18,8 +18,8 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
 
 ## T1 — Repo destino validado en `delegate`
 
-- [ ] Open
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C1 · **Implements**: R1, R2, E1, E2, E6
 - **Files**: `server/src/repo.ts`, `server/src/delegate.ts`, `server/src/prompt-builder.ts`, `server/src/worktree.ts`, `server/src/index.ts`, `server/src/config.ts`, `server/tests/repo.spec.ts`, `server/tests/delegate.spec.ts`, `server/tests/helpers.ts`
 - **Do**:
@@ -41,11 +41,12 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
   - dos repos distintos usan dos directorios `repoKey`;
   - sin `repo`, los tests existentes siguen pasando sin cambiarlos (SC8).
 - **Verify**: `npm --prefix server test -- repo delegate`
+- **Notes**: Hecha por Claude. `server/src/repo.ts` (`RepoError`, `resolveRepo`) valida con `realOrResolved` (ahora exportado desde `worktree.ts`) antes de `jobs.start`; un path inexistente da `REPO_NOT_FOUND`. `delegate()` usa el repo resuelto como `repoRoot`, base de `buildPrompt` (quita el prefijo `<repo>/` de `files`) y cwd sin worktree; `isolation.symlinkByRepo` en `config.ts`. Como hoy, el error de "no commits" se lanza (no `failed`) y ahora nombra el repo. `makeWorkspace()` en `tests/helpers.ts`; `tests/repo.spec.ts` (4) y 5 casos en `delegate.spec.ts`. Gates: typecheck 0 errores, 281 passed (272 + 9), plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: none
 
 ## T2 — Sin rutas ni secretos del origen en el worker
 
 - [ ] Open
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C2 · **Implements**: R3, E4
 - **Files**: `server/src/worktree.ts`, `server/src/worker-env.ts`, `server/src/delegate.ts`, `server/tests/fixtures/fake-codex.mjs`, `server/tests/delegate.spec.ts`, `server/tests/guardrails.spec.ts`
 - **Do**:
