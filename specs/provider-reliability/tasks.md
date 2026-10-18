@@ -223,3 +223,32 @@ Hallazgos de una revisión independiente en modo read con codex (delegación 202
 ---
 
 ## Verification reports
+
+### Verification report — provider-reliability — 2026-10-18 — pass 1
+
+Change set: `main@2dba211...HEAD` (`feature/provider-reliability`)
+Converged: yes — SC1 y SC2 quedan como comprobación manual en la máquina del usuario (smoke real de los dos adapters ya hecho, ver T7)
+
+| Req | Verdict | Evidence (case · assertion · clause) |
+|---|---|---|
+| R1 | met | `codex-app-server.spec.ts` (7 casos): respuesta final y uso, `sandbox` por modo, `approvalPolicy: "never"`, `-32601` a solicitudes del servidor, `codexErrorInfo` → QUOTA. Smoke real: codex-cli 0.158 por `app-server` → `OK` en 4,5 s sin fallback |
+| R2 | met | `adapters.spec.ts::"R2: write mode skips permission prompts by default; read mode does not"`; smoke real de agy write con `run_command` → `DONE` en 12 s |
+| R3 | met | `adapters.spec.ts::"R3: a step waiting for approval…"` → `PERMISSION_BLOCKED` con `run_command: npm test` en < 5 s. El evento real no se observó (agy no pidió permiso en print mode); detección inferida, con `STALLED` como red |
+| R4 | met | `process.spec.ts` (salida periódica sobrevive, silencio → `stalled`, total sigue vigente); `codex-app-server.spec.ts::"R4…"`; `config.spec.ts` (defaults 30 min / 120 s) |
+| R5 | met | `delegate.spec.ts::"R5: a write that stalls after changing files ends as partial…"` (1 intento, 1 worktree, `patchFile`) y `"R5: without changes, a timeout is retried…"` |
+| R6 | met | `process.spec.ts::"R6…"` (árbol muerto), `delegate.spec.ts::"R6/E3…"` (1 intento, breaker 0, diff conservado), `sdd-task-delegation.spec.ts` (Owner intacto), `codex-app-server.spec.ts::"R6…"` (`turn/interrupt` + proceso muerto), `fallback.spec.ts` (cancel en el backoff) |
+| R7 | met | `fallback.spec.ts::"provider-reliability R7…"` (+ NOT_INSTALLED), `card-model.spec.ts` (1 fallo `ok`, 2 `degraded`, aviso como detalle), `statusline.spec.ts` (mismo umbral) |
+| R8 | met | `jobs.spec.ts::"R8/E4…"` (progreso, archivos en vivo, `state.json`, cancel), `conductor-card.test.tsx::"a delegation the server reports in state.json jobs…"` |
+| E1 | met | `codex-app-server.spec.ts::"E1…"` (sin `app-server` e `initialize` fallido → exec con nota); `doctor.spec.ts::"E1/E2…"` |
+| E2 | met | `adapters.spec.ts::"E2…"` (flag desconocido → text con nota); `doctor.spec.ts::"E1/E2…"` |
+| E3 | met | `delegate.spec.ts::"R6/E3…"` |
+| E4 | met | `jobs.spec.ts::"R8/E4…"` (`already cancelled`) |
+| E5 | met | `jobs.spec.ts::"E5…"` (`lost`) |
+| E6 | met | `jobs.spec.ts::"E6…"` y `"the prompt never reaches progress"`; `adapters.spec.ts::"E6…"`; G2 resuelto |
+
+Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 21 passed (21) · Tests 272 passed (272)` (baseline 236; +36 nuevos, 0 omitidos) · `claude plugin validate .` ✅ · `claude plugin test .` ✅ `12 pass, 0 fail` (baseline 11) · Dist ✅ al día tras el build · CI multiplataforma: en el push a `main` (merge sin PR, a pedido del usuario)
+Cross-review: codex en modo read (delegación 20261018060252-3f2197) → 8 hallazgos, todos verificados; 7½ aceptados y resueltos (G1–G8), media parte de G8 rechazada por R7
+Dead-code sweep: `tsc --noUnusedLocals --noUnusedParameters` → 0 tras quitar un `patterns` muerto
+Success criteria: SC1 pending — manual (repetir una tarea con `npm test` vía agy) · SC2 pending — manual (cancelar y comprobar procesos, breaker y worktrees); ambos cubiertos por tests con CLIs falsos
+Attribution: none
+Shortcuts declared: R3 detecta el permiso por un formato inferido, no observado
