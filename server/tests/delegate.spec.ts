@@ -357,7 +357,7 @@ describe("nested-repos: delegate with repo", () => {
     expect(r.status).toBe("success");
     expect(r.repo).toBe("backend-monolith");
     const meta = await readMeta(r.worktreePath!);
-    expect(realpathSync(meta.repoRoot)).toBe(realpathSync(nested));
+    expect(realpathSync.native(meta.repoRoot)).toBe(realpathSync.native(nested));
     expect(existsSync(path.join(r.worktreePath!, "package.json"))).toBe(true);
     expect(existsSync(path.join(r.worktreePath!, ".gitignore"))).toBe(true);
     expect(r.filesChanged).toEqual(["added-by-worker.txt"]);
@@ -397,7 +397,7 @@ describe("nested-repos: delegate with repo", () => {
       FAKE_MODE: "probe-secrets",
       FAKE_PROBE_FILE: probeFile,
       FAKE_PROMPT_FILE: promptFile,
-      FAKE_FORBIDDEN_PATH: [root, realpathSync(root)].join(","),
+      FAKE_FORBIDDEN_PATH: [root, realpathSync.native(root)].join(","),
       CLAUDE_PROJECT_DIR: root,
       MP_PROJECT_DIR: root,
       PWD: nested,
@@ -414,7 +414,7 @@ describe("nested-repos: delegate with repo", () => {
       const prompt = readFileSync(promptFile, "utf8");
       expect(prompt).not.toContain("prod-secret");
       expect(prompt).not.toContain(root);
-      expect(prompt).not.toContain(realpathSync(root));
+      expect(prompt).not.toContain(realpathSync.native(root));
       expect(r.files.find((f) => f.path === ".env")?.reason).toMatch(/sensitive/);
     } finally {
       for (const k of ["FAKE_PROBE_FILE", "FAKE_PROMPT_FILE", "FAKE_FORBIDDEN_PATH", "CLAUDE_PROJECT_DIR", "MP_PROJECT_DIR"]) delete process.env[k];
@@ -435,7 +435,7 @@ describe("nested-repos: delegate with repo", () => {
     expect(meta.skippedSymlinks).toEqual([".env", "config/.env.production"]);
     expect(existsSync(path.join(r.worktreePath!, ".env"))).toBe(false);
     expect(r.notes?.some((n) => n.includes("symlink skipped") && n.includes(".env"))).toBe(true);
-    const rel = path.relative(realpathSync(nested), realpathSync(meta.hooksDir));
+    const rel = path.relative(realpathSync.native(nested), realpathSync.native(meta.hooksDir));
     expect(rel.startsWith("..") || path.isAbsolute(rel)).toBe(true);
     expect(existsSync(path.join(meta.hooksDir, "pre-commit"))).toBe(true);
     await removeWorktree(meta);
@@ -470,7 +470,7 @@ describe("nested-repos: delegate with repo", () => {
     process.env.FAKE_MODE = "write";
     const r = await delegate({ provider: "codex", task: "t", mode: "write", repo: "backend-monolith", sdd: { slug: "demo", taskId: "T3" } }, c);
     const state = await c.store.read();
-    expect(state.repos?.map((p) => realpathSync(p))).toEqual([realpathSync(nested)]);
+    expect(state.repos?.map((p) => realpathSync.native(p))).toEqual([realpathSync.native(nested)]);
     // The root alone does not see it; with the registry it does.
     expect(await listWorktrees(root)).toEqual([]);
     const outside = makeRepo();
@@ -545,7 +545,7 @@ describe("nested-repos: delegate with repo", () => {
       FAKE_PROMPT_FILE: promptFile,
       FAKE_MODE: "probe-secrets",
       FAKE_PROBE_FILE: probeFile,
-      FAKE_FORBIDDEN_PATH: [root, realpathSync(root)].join(","),
+      FAKE_FORBIDDEN_PATH: [root, realpathSync.native(root)].join(","),
       [pathKeyName]: [path.join(nested, "node_modules", ".bin"), pathBefore].join(path.delimiter),
     });
     try {

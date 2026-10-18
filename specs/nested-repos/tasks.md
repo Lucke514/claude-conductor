@@ -212,6 +212,7 @@ Hallazgos de una revisión independiente en modo read con codex (delegación 202
   - el `PATH` heredado podía nombrar el repo de origen (`<repo>/node_modules/.bin`). Ahora `workerEnv` quita las entradas que están bajo el proyecto o el repo de origen.
 - [x] **G5** — `repo.ts`: `inside()` rechazaba nombres que solo empiezan por `..` (`..backend`). Ahora compara `..` como segmento.
 - [>] **G6** — Deferred: `managedWorktrees` lista todos los `mp/*` del git dir compartido. Si el proyecto contiene un worktree enlazado de un repo externo, `delegation_cleanup` también limpia los `mp/*` creados desde ese repo. Ya pasaba antes de esta rama con un proyecto que fuera un worktree enlazado, y el escenario es poco realista. Queda como deuda.
+- [x] **G8** — CI en Windows (run 39106269117): 4 tests nuevos comparaban rutas con `realpathSync`, que no expande los nombres 8.3 (`RUNNER~1`), contra rutas que git devuelve en forma larga. Los tests pasan a `realpathSync.native`, como ya hacía el código (`realOrResolved`). Solo cambian tests; Linux y macOS ya pasaban.
 - [~] **G7** — Waived: el texto del brief de la tarea muestra los `Files` con el prefijo `<Repo>/` aunque los adjuntos van sin él. Es cosmético; el worker recibe las dos formas y las rutas del worktree son relativas al repo.
 
 ---
@@ -244,7 +245,7 @@ Converged: yes — G6 diferido (pre-existente, poco realista) y G7 descartado (c
 | E5 | met | `hooks-setup.spec.ts::"nested-repos R11/E5…"` |
 | E6 | met | `delegate.spec.ts::"E6…"` |
 
-Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 23 passed (23) · Tests 315 passed (315)` (baseline 272; +43 nuevos, 0 omitidos salvo el caso `chmod` en Windows/root) · `claude plugin validate .` ✅ · `claude plugin test .` ✅ `12 pass, 0 fail` · Dist ✅ reconstruido · CI multiplataforma: en el push a `main` (merge sin PR, decisión del plan)
+Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 23 passed (23) · Tests 315 passed (315)` (local y matriz de CI tras G8) (baseline 272; +43 nuevos, 0 omitidos salvo el caso `chmod` en Windows/root) · `claude plugin validate .` ✅ · `claude plugin test .` ✅ `12 pass, 0 fail` · Dist ✅ reconstruido · CI multiplataforma: en el push a `main` (merge sin PR, decisión del plan)
 Cross-review: codex en modo read (delegación 20261018065508-4a491e) → 11 hallazgos, todos verificados; 9 resueltos (G1–G5), 1 diferido (G6), 1 descartado (G7)
 Dead-code sweep: `tsc --noUnusedLocals --noUnusedParameters` → 0
 Tests changed: `adapters.spec.ts::"plain spawn…"` (args de agy en read, por el default deliberado de R7) y `secrets-scan.spec.ts` ("no sigue symlinks" → G1). Ninguno por `repo`/`**Repo**`, así que SC8 se cumple

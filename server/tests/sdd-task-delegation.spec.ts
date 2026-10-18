@@ -255,7 +255,7 @@ describe("nested-repos: **Repo** in sdd_task_*", () => {
     expect(r.status).toBe("success");
     expect(r.repo).toBe(".claude/worktrees/demo/backend-monolith");
     const meta = await readMeta(r.worktreePath!);
-    expect(realpathSync(meta.repoRoot)).toBe(realpathSync(w.specWt!));
+    expect(realpathSync.native(meta.repoRoot)).toBe(realpathSync.native(w.specWt!));
     expect(meta.baseCommit).toBe(git(w.specWt!, "rev-parse", "HEAD"));
     expect(existsSync(path.join(r.worktreePath!, "spec-branch.txt"))).toBe(true);
     expect(r.sdd.verification.find((v) => v.kind === "verify")).toMatchObject({ result: "pass" });
@@ -279,7 +279,7 @@ describe("nested-repos: **Repo** in sdd_task_*", () => {
     process.env.FAKE_MESSAGE = WORKER;
     process.env.FAKE_WRITE_FILE = "backend-monolith-only.txt";
     const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, w.ctx);
-    expect(realpathSync((await readMeta(r.worktreePath!)).repoRoot)).toBe(realpathSync(w.nested));
+    expect(realpathSync.native((await readMeta(r.worktreePath!)).repoRoot)).toBe(realpathSync.native(w.nested));
     // Outside the task's Files, relative to the repo: drift is computed there, not against the root.
     expect(r.sdd.drift).toEqual(["backend-monolith-only.txt"]);
     await removeWorktree(await readMeta(r.worktreePath!));
