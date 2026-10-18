@@ -50,7 +50,16 @@ export interface SddFeature {
   gates: QualityGate[];
 }
 
-export type SddErrorCode = "INVALID_SLUG" | "FEATURE_NOT_FOUND" | "TASK_NOT_FOUND" | "NO_OPEN_TASK" | "UNKNOWN_REFERENCE";
+export type SddErrorCode =
+  | "INVALID_SLUG"
+  | "FEATURE_NOT_FOUND"
+  | "TASK_NOT_FOUND"
+  | "NO_OPEN_TASK"
+  | "UNKNOWN_REFERENCE"
+  | "NOT_APPROVED"
+  | "TASK_CLOSED"
+  | "TASK_CLAIMED"
+  | "CLAIM_NOT_COMMITTED";
 
 export class SddError extends Error {
   constructor(

@@ -32,14 +32,14 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 
 ## T3 [P] — Claim y handback
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C3 · **Implements**: R5, R6, R9, E6, E10
 - **Files**: `server/src/sdd/claim.ts`, `server/tests/sdd-claim.spec.ts`
 - **Do**: Implementar `checkDelegable`, `writeOwner` (reescribe solo la línea `**Owner**` de la tarea, atómico), `claimCommitted` (`git show HEAD:specs/<slug>/tasks.md` + árbol no revertido) y el comando de commit con pathspec `-- specs/<slug>/tasks.md`.
 - **Acceptance**: Rechazo por Status no aprobado de spec, tasks o plan existente, y por casilla `[x]`/`[~]`/`[>]`/`[!]` u otro owner; segundo claim rechazado; `writeOwner` cambia una sola línea; con otro archivo modificado, ejecutar el comando devuelto commitea solo `tasks.md`; `claimCommitted` es falso antes del commit y verdadero después.
 - **Verify**: `npm --prefix server test -- sdd-claim`
-- **Notes**: —
+- **Notes**: `server/src/sdd/claim.ts` (`checkDelegable`, `replaceOwner`/`writeOwner`, `commitCommand` con pathspec, `claimCommitted` vía `HEAD:./<ruta>`) y `server/tests/sdd-claim.spec.ts` (4 casos); commit `sdd-task-delegation: T3 claim and handback`. Gates: typecheck 0 errores, 168 passed. Clean-code: none · close calls: `claimCommitted` usa `HEAD:./ruta` relativo al cwd en vez de una ruta relativa a la raíz — se queda, evita el desajuste `/var` vs `/private/var` y nombres 8.3 que ya rompieron CI en macOS/Windows
 
 ## T4 [P] — Verificación de la tarea
 
