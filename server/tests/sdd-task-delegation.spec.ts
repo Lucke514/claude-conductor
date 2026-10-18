@@ -1,12 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
 import { parseAcceptance, sddTaskClaim, sddTaskDelegate, sddTaskRelease } from "../src/sdd/task-delegation.js";
-import { removeWorktree, readMeta } from "../src/worktree.js";
-import { makeRepo, testConfig, tmpDir } from "./helpers.js";
+import { applyWorktree, removeWorktree, readMeta } from "../src/worktree.js";
+import type { ProviderAdapter, ProviderName } from "../src/providers/types.js";
+import { makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
 import { PLAN, SPEC, TASKS, writeFeature } from "./sdd-fixtures.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
@@ -173,6 +174,23 @@ describe("sdd_task_* tools", () => {
     await expect(sddTaskDelegate({ slug: "demo", task: "T3" }, s.ctx)).rejects.toThrow(/owned by '—'/);
   });
 
+  it("nested-repos R9/SC6: the task claimed for codex but answered by antigravity says so", async () => {
+    const s = setup(TASKS, { chain: ["codex", "antigravity", "claude"] });
+    await claimAndCommit(s);
+    const make = (name: ProviderName, ok: boolean): ProviderAdapter => ({
+      name,
+      isAvailable: async () => true,
+      healthCheck: async () => ({}) as never,
+      run: async () =>
+        ok
+          ? { ok: true, output: WORKER, exitCode: 0, durationMs: 1 }
+          : { ok: false, output: "", exitCode: 1, durationMs: 1, error: { type: "AUTH", message: "401 Unauthorized" } },
+    });
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, { ...s.ctx, adapters: { codex: make("codex", false), antigravity: make("antigravity", true) } });
+    expect(r).toMatchObject({ requestedProvider: "codex", provider: "antigravity" });
+    expect(r.notes).toContain("requested codex, answered by antigravity (fallback after codex: AUTH)");
+  });
+
   it("auto claims for the routed provider, else the first of the chain", async () => {
     const s = setup(TASKS, { chain: ["antigravity", "codex", "claude"], routing: {} });
     expect((await sddTaskClaim({ slug: "demo", task: "T3" }, s.ctx)).provider).toBe("antigravity");
@@ -189,5 +207,151 @@ describe("sdd_task_* tools", () => {
       ["E2", "unverifiable", "no test"],
       ["R1", "unverifiable", "no line for this item in the worker's ## Acceptance section"],
     ]);
+  });
+});
+
+describe("nested-repos: **Repo** in sdd_task_*", () => {
+  const REPO_TASKS = TASKS.replace("- **Component**: C2 · **Implements**: R1, E2\n", "- **Component**: C2 · **Implements**: R1, E2\n- **Repo**: backend-monolith\n");
+
+  /** A workspace whose specs/ live in the root and whose code lives in backend-monolith/ (optionally a spec worktree of it). */
+  function workspace(opts: { specWorktree?: boolean; plan?: string } = {}) {
+    const { root, nested } = makeWorkspace();
+    writeFeature(root, "demo", { "spec.md": SPEC, "plan.md": opts.plan ?? PLAN, "tasks.md": REPO_TASKS });
+    git(root, "add", "-A");
+    git(root, "commit", "-qm", "demo: artifacts");
+    let specWt: string | undefined;
+    if (opts.specWorktree) {
+      specWt = path.join(root, ".claude", "worktrees", "demo", "backend-monolith");
+      mkdirSync(path.dirname(specWt), { recursive: true });
+      git(nested, "worktree", "add", "-q", "-b", "feat/demo", specWt);
+      execFileSync(process.execPath, ["-e", `require("fs").writeFileSync("spec-branch.txt", "on feat/demo\\n")`], { cwd: specWt });
+      git(specWt, "add", "-A");
+      git(specWt, "commit", "-qm", "work on the spec branch");
+    }
+    const ctx = {
+      projectDir: root,
+      config: testConfig({ chain: ["codex", "claude"] }),
+      store: new StateStore(path.join(tmpDir(), "state.json")),
+      instanceId: "test",
+      sleep: async () => undefined,
+    };
+    return { root, nested, specWt, ctx };
+  }
+
+  async function claim(w: ReturnType<typeof workspace>) {
+    const c = await sddTaskClaim({ slug: "demo", task: "T3", provider: "codex" }, w.ctx);
+    git(w.root, "commit", "-qm", "demo: claim T3", "--", "specs/demo/tasks.md");
+    return c;
+  }
+
+  it("SC2: works on the spec's worktree: mp/* from its branch, Verify there, apply lands there only", async () => {
+    const w = workspace({ specWorktree: true });
+    const c = await claim(w);
+    expect(c.repo).toBe(".claude/worktrees/demo/backend-monolith");
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, w.ctx);
+    expect(r.status).toBe("success");
+    expect(r.repo).toBe(".claude/worktrees/demo/backend-monolith");
+    const meta = await readMeta(r.worktreePath!);
+    expect(realpathSync(meta.repoRoot)).toBe(realpathSync(w.specWt!));
+    expect(meta.baseCommit).toBe(git(w.specWt!, "rev-parse", "HEAD"));
+    expect(existsSync(path.join(r.worktreePath!, "spec-branch.txt"))).toBe(true);
+    expect(r.sdd.verification.find((v) => v.kind === "verify")).toMatchObject({ result: "pass" });
+    expect(r.sdd.drift).toEqual([]);
+    expect(r.sdd.verified).toBe(true);
+
+    const applied = await applyWorktree(r.worktreePath!, "sc2");
+    expect(applied.applied).toBe(true);
+    expect(readFileSync(path.join(w.specWt!, "index.ts"), "utf8")).toBe("from worker\n");
+    expect(git(w.nested, "status", "--porcelain")).toBe("");
+    expect(git(w.root, "status", "--porcelain")).toBe("");
+  });
+
+  it("R4: without a spec worktree it uses the repo at the root; the claim is still checked in the root's HEAD", async () => {
+    const w = workspace();
+    const c = await sddTaskClaim({ slug: "demo", task: "T3", provider: "codex" }, w.ctx);
+    expect(c.repo).toBe("backend-monolith");
+    await expect(sddTaskDelegate({ slug: "demo", task: "T3" }, w.ctx)).rejects.toMatchObject({ code: "CLAIM_NOT_COMMITTED" });
+    git(w.root, "commit", "-qm", "demo: claim T3", "--", "specs/demo/tasks.md");
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "backend-monolith-only.txt";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, w.ctx);
+    expect(realpathSync((await readMeta(r.worktreePath!)).repoRoot)).toBe(realpathSync(w.nested));
+    // Outside the task's Files, relative to the repo: drift is computed there, not against the root.
+    expect(r.sdd.drift).toEqual(["backend-monolith-only.txt"]);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("R4: an unknown **Repo** fails with REPO_NOT_FOUND before writing the Owner", async () => {
+    const w = workspace();
+    const tasksFile = path.join(w.root, "specs/demo/tasks.md");
+    const text = REPO_TASKS.replace("- **Repo**: backend-monolith", "- **Repo**: web-app");
+    execFileSync(process.execPath, ["-e", `require("fs").writeFileSync(${JSON.stringify(tasksFile)}, ${JSON.stringify(text)})`]);
+    const err = await sddTaskClaim({ slug: "demo", task: "T3", provider: "codex" }, w.ctx).catch((e) => e);
+    expect(err).toMatchObject({ code: "REPO_NOT_FOUND" });
+    expect(err.message).toContain(".claude/worktrees/demo/web-app, web-app");
+    expect(readFileSync(tasksFile, "utf8")).toBe(text);
+  });
+
+  it("E3: a spec worktree that is not a git repo falls back to the root repo, with a note", async () => {
+    const w = workspace();
+    mkdirSync(path.join(w.root, ".claude", "worktrees", "demo", "backend-monolith"), { recursive: true });
+    const c = await claim(w);
+    expect(c.repo).toBe("backend-monolith");
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, w.ctx);
+    expect(r.notes?.some((n) => n.startsWith(".claude/worktrees/demo/backend-monolith was skipped"))).toBe(true);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("G2: on the spec worktree, symlinkByRepo is keyed by the task's **Repo** name", async () => {
+    const w = workspace({ specWorktree: true });
+    mkdirSync(path.join(w.specWt!, "node_modules", "dep"), { recursive: true });
+    w.ctx.config = testConfig({ chain: ["codex", "claude"], isolation: { symlinkByRepo: { "backend-monolith": ["node_modules"] } } });
+    await claim(w);
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, w.ctx);
+    expect((await readMeta(r.worktreePath!)).symlinks).toEqual(["node_modules"]);
+    expect(existsSync(path.join(r.worktreePath!, "node_modules", "dep"))).toBe(true);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("G3: a task without **Repo** still runs a gate whose Where names a nested repo", async () => {
+    const s = setup(TASKS, {});
+    const plan = PLAN.replace("| Tests | `node -e \"process.exit(0)\"` | `here` |", "| Tests | `node -e \"process.exit(0)\"` | `backend` |");
+    writeFeature(s.repo, "demo", { "spec.md": SPEC, "plan.md": plan, "tasks.md": TASKS });
+    mkdirSync(path.join(s.repo, "backend"));
+    makeRepo(path.join(s.repo, "backend"));
+    git(s.repo, "add", "specs");
+    git(s.repo, "commit", "-qm", "plan with a backend gate");
+    await claimAndCommit(s);
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, s.ctx);
+    expect(r.sdd.verification.find((v) => v.gate === "Tests")).toMatchObject({ result: "pass" });
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("R5: a gate whose Where names another repo of the workspace stays manual", async () => {
+    const plan = PLAN.replace("| Tests | `node -e \"process.exit(0)\"` | `here` |", "| Tests | `node -e \"process.exit(0)\"` | `here` |\n| Web | `node -e \"process.exit(0)\"` | `web-app` | `exit 0` |");
+    const w = workspace({ plan });
+    mkdirSync(path.join(w.root, "web-app"));
+    makeRepo(path.join(w.root, "web-app"));
+    await claim(w);
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, w.ctx);
+    expect(r.sdd.verification.find((v) => v.gate === "Web")).toMatchObject({ result: "manual", reason: expect.stringMatching(/^runs in web-app/) });
+    expect(r.sdd.verification.find((v) => v.gate === "Tests")).toMatchObject({ result: "pass" });
+    await removeWorktree(await readMeta(r.worktreePath!));
   });
 });

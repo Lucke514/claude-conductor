@@ -1,6 +1,6 @@
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import type { MpConfig } from "./config.js";
-import { isAttributable, type ErrorType, type ProviderAdapter, type ProviderError, type ProviderName, type ProviderResult } from "./providers/types.js";
+import { isAttributable, type ErrorType, type Mode, type ProviderAdapter, type ProviderError, type ProviderName, type ProviderResult } from "./providers/types.js";
 import type { RunResult } from "./process.js";
 
 // ---------------------------------------------------------------------------
@@ -109,6 +109,11 @@ export function backoffDelay(retry: MpConfig["retry"], attempt: number): number 
  * Build the order to try: an explicit provider goes first, followed by the rest
  * of the configured chain (unless fallback is disabled).
  */
+/** The chain for a mode: `chainByMode[mode]` when set, else `chain`. */
+export function chainFor(config: Pick<MpConfig, "chain" | "chainByMode">, mode: Mode): ChainEntry[] {
+  return config.chainByMode[mode] ?? config.chain;
+}
+
 export function resolveOrder(chain: ChainEntry[], first?: ProviderName, fallback = true): ChainEntry[] {
   if (!first) return [...chain];
   if (!fallback) return [first];

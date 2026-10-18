@@ -20,6 +20,8 @@ export interface SddTask {
   component?: string;
   implements: string[];
   files: string[];
+  /** The `**Repo**` field: the code repository the task works on (nested-repos R4). */
+  repo?: string;
   do?: string;
   acceptance?: string;
   /** The Verify field as written. */
@@ -118,6 +120,7 @@ export function parseTasks(text: string): SddTask[] {
     const files = field(block, "Files");
     const component = field(block, "Component");
     const verify = field(block, "Verify");
+    const repo = field(block, "Repo")?.replace(/^`|`$/g, "");
     const task: SddTask = {
       id: h[2]!,
       title: (h[4] ?? "").trim(),
@@ -135,6 +138,7 @@ export function parseTasks(text: string): SddTask[] {
       if (v) task[k === "Do" ? "do" : "acceptance"] = v;
     }
     if (verify) task.verify = verify;
+    if (!unclaimed(repo)) task.repo = repo!;
     tasks.push(task);
   }
   return tasks;

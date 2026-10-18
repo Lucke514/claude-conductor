@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import path from "node:path";
 import { mpHome } from "./paths.js";
 import { gitConfigEnv, type WorktreeMeta } from "./worktree.js";
@@ -43,6 +43,12 @@ export async function ensureShims(): Promise<void> {
   }
 }
 
+/**
+ * Variables holding the project's or the server's absolute path. A worker in a
+ * nested repo's worktree must not learn where the source tree (and its `.env`) is.
+ */
+export const PROJECT_PATH_ENV = ["CLAUDE_PROJECT_DIR", "MP_PROJECT_DIR", "PWD", "OLDPWD", "INIT_CWD"] as const;
+
 /** The PATH variable's own name (`Path` on Windows), so we never end up with two. */
 export function pathKey(env: NodeJS.ProcessEnv): string {
   return Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
@@ -52,17 +58,44 @@ export function pathKey(env: NodeJS.ProcessEnv): string {
  * Overrides for `buildChildEnv`: `undefined` deletes a variable. With a worktree,
  * its hooks are forced too.
  */
-export function workerEnv(meta?: Pick<WorktreeMeta, "hooksDir">, env: NodeJS.ProcessEnv = process.env): Record<string, string | undefined> {
+/** Whether `dir` is one of `roots` or inside one (compared as given and with symlinks resolved). */
+function under(dir: string, roots: string[]): boolean {
+  const forms = (p: string) => {
+    const out = [path.resolve(p)];
+    try {
+      out.push(realpathSync.native(p));
+    } catch {
+      // Missing directories only compare as given.
+    }
+    return out;
+  };
+  return forms(dir).some((d) =>
+    roots.flatMap(forms).some((r) => {
+      const rel = path.relative(r, d);
+      return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+    }),
+  );
+}
+
+/**
+ * `hidePaths`: the project and source repo roots. PATH entries under them (e.g.
+ * `<repo>/node_modules/.bin`) are dropped, so the worker's environment never names them.
+ */
+export function workerEnv(
+  meta?: Pick<WorktreeMeta, "hooksDir">,
+  env: NodeJS.ProcessEnv = process.env,
+  hidePaths: string[] = [],
+): Record<string, string | undefined> {
   const key = pathKey(env);
   const out: Record<string, string | undefined> = {};
-  for (const name of CREDENTIAL_ENV) out[name] = undefined;
+  for (const name of [...CREDENTIAL_ENV, ...PROJECT_PATH_ENV]) out[name] = undefined;
   const entries: [string, string][] = [["credential.helper", ""]];
   if (meta) entries.push(["core.hooksPath", meta.hooksDir]);
   Object.assign(out, gitConfigEnv(entries, env), {
     GIT_TERMINAL_PROMPT: "0",
     GIT_ALLOW_PROTOCOL: "file",
     GH_CONFIG_DIR: emptyGhConfigDir(),
-    [key]: [shimDir(), env[key]].filter(Boolean).join(path.delimiter),
+    [key]: [shimDir(), ...(env[key] ?? "").split(path.delimiter).filter((d) => d && !(hidePaths.length && under(d, hidePaths)))].join(path.delimiter),
   });
   return out;
 }

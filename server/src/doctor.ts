@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadConfig, type ProviderConfig } from "./config.js";
+import { loadConfig, type MpConfig, type ProviderConfig } from "./config.js";
 import { checkHealth, makeAdapters, type ProviderStatus } from "./health.js";
 import { ptyAvailable, runProcess } from "./process.js";
 import { PROVIDER_NAMES, type ProviderAdapter, type ProviderName } from "./providers/types.js";
+import { workspaceRepos } from "./repo.js";
+import { scanSecrets } from "./secrets-scan.js";
 import { pluginRoot } from "./setup.js";
 import type { StateStore } from "./state.js";
 
@@ -118,6 +120,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   const { config } = loaded;
 
   checks.push(mcpConfigCheck(opts.pluginRoot ?? pluginRoot()));
+  checks.push(...(await workspaceChecks(opts.projectDir, config)));
 
   const agy = config.providers.antigravity;
   // stream-json (the default) runs without a PTY; only text/json need node-pty.
@@ -167,6 +170,61 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   return { ok: checks.every((c) => c.level !== "fail"), checks };
 }
 
+/** Nested git repos a delegation can target with `repo`: top-level ones and the specs' worktrees. */
+async function nestedRepos(projectDir: string): Promise<string[]> {
+  const repos = await workspaceRepos(projectDir);
+  const specs = path.join(projectDir, ".claude", "worktrees");
+  for (const slug of subdirs(specs)) {
+    for (const repo of await workspaceRepos(path.join(specs, slug))) repos.push(`.claude/worktrees/${slug}/${repo}`);
+  }
+  return repos;
+}
+
+function subdirs(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+/** nested-repos R12: the repos `repo` / `**Repo**` can name, and whether readMode keeps their .env files away from workers. */
+export async function workspaceChecks(projectDir: string, config: Pick<MpConfig, "isolation">): Promise<DoctorCheck[]> {
+  const repos = await nestedRepos(projectDir);
+  const withSecrets: string[] = [];
+  for (const r of repos) if ((await scanSecrets(path.join(projectDir, ...r.split("/")))).found.length > 0) withSecrets.push(r);
+  const checks: DoctorCheck[] = [
+    repos.length === 0
+      ? { name: "workspace repos", level: "skip", detail: "no nested git repos under the project" }
+      : {
+          name: "workspace repos",
+          level: "ok",
+          detail: `${repos.map((r) => (withSecrets.includes(r) ? `${r} (.env)` : r)).join(", ")} — delegate with \`repo\` or a task's **Repo**`,
+        },
+  ];
+  if (config.isolation.readMode === "cwd") {
+    const scan = await scanSecrets(projectDir);
+    checks.push(
+      scan.found.length > 0 || scan.truncated
+        ? {
+            name: "read isolation",
+            level: "warn",
+            detail: `readMode "cwd": workers read the real tree, where ${scan.found.length ? scan.found.join(", ") : "the .env scan hit its limit"}${scan.found.length && scan.truncated ? ", …" : ""} ${config.isolation.allowCwdWithSecrets ? "is reachable (allowCwdWithSecrets: true)" : "make read delegations fail with UNSAFE_READ_MODE"}`,
+            fix: 'set isolation.readMode: "worktree" (ignored files never reach the worker)',
+          }
+        : { name: "read isolation", level: "ok", detail: 'readMode "cwd", no .env files reachable' },
+    );
+  } else {
+    checks.push({
+      name: "read isolation",
+      level: "ok",
+      detail:
+        "worktree: ignored files (.env*) are never in the worker's directory. Residual: the CLIs' sandboxes do not block reads by absolute path outside it",
+    });
+  }
+  return checks;
+}
+
 /** E1: which transport codex will really use. */
 export async function codexTransportCheck(cfg: ProviderConfig): Promise<DoctorCheck> {
   const name = "codex: transport";
@@ -190,13 +248,14 @@ export async function agyFlagsCheck(cfg: ProviderConfig): Promise<DoctorCheck> {
   const missing = [
     (cfg.outputFormat ?? "stream-json") === "stream-json" && !/stream-json/.test(help) ? "--output-format stream-json" : "",
     !cfg.writeModeArgs && !/--dangerously-skip-permissions/.test(help) ? "--dangerously-skip-permissions" : "",
+    !cfg.readModeArgs && !/--mode\b[^\n]*\bplan\b/.test(help) ? "--mode plan" : "",
   ].filter(Boolean);
-  if (missing.length === 0) return { name, level: "ok", detail: "stream-json and --dangerously-skip-permissions available" };
+  if (missing.length === 0) return { name, level: "ok", detail: "stream-json, --dangerously-skip-permissions and --mode plan available" };
   return {
     name,
     level: "warn",
     detail: `this agy does not list ${missing.join(" and ")}`,
-    fix: "update Antigravity CLI, or set providers.antigravity.outputFormat: \"text\" / writeModeArgs explicitly",
+    fix: "update Antigravity CLI, or set providers.antigravity.outputFormat: \"text\" / writeModeArgs / readModeArgs explicitly",
   };
 }
 

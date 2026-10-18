@@ -17,6 +17,8 @@ import { findInPath, runProcess } from "../process.js";
 /** Conservative argv limits (Windows command line is 32767 chars total). */
 /** Write mode runs in a disposable worktree without git/GitHub credentials (sdd-guardrails R4/R5). */
 export const DEFAULT_WRITE_ARGS = ["--dangerously-skip-permissions"];
+/** Read mode plans only: agy proposes and does not act (nested-repos R7). */
+export const DEFAULT_READ_ARGS = ["--mode", "plan"];
 const MAX_ARG_PROMPT = process.platform === "win32" ? 24_000 : 100_000;
 /** Find the JSON envelope ({response, status, usage}) in possibly noisy output. */
 export function parseAgyJson(output) {
@@ -166,7 +168,7 @@ export class AntigravityAdapter {
         if (format !== "text")
             args.push("--output-format", format);
         // Headless write mode cannot answer permission prompts: skip them inside the isolated worktree (R2).
-        args.push(...((req.mode === "write" ? (this.cfg.writeModeArgs ?? DEFAULT_WRITE_ARGS) : this.cfg.readModeArgs) ?? []));
+        args.push(...((req.mode === "write" ? (this.cfg.writeModeArgs ?? DEFAULT_WRITE_ARGS) : (this.cfg.readModeArgs ?? DEFAULT_READ_ARGS))));
         args.push(...this.cfg.extraArgs);
         args.push("-p", prompt);
         return args;

@@ -3,6 +3,8 @@ import { existsSync, promises as fs, realpathSync } from "node:fs";
 import path from "node:path";
 import { git, gitOk, repoRootOf } from "./git.js";
 import { patchesDir, worktreesDir } from "./paths.js";
+import { isSensitivePath } from "./prompt-builder.js";
+import { scanSecrets } from "./secrets-scan.js";
 
 /**
  * Isolated git worktrees for delegated work.
@@ -24,6 +26,8 @@ export interface WorktreeMeta {
   createdAt: string;
   hooksDir: string;
   symlinks: string[];
+  /** `symlink` entries left out because they name credentials or secrets (nested-repos R3). */
+  skippedSymlinks?: string[];
   /** The spec-driven task this worktree works on (sdd_task_delegate). */
   sdd?: { slug: string; taskId: string };
 }
@@ -60,6 +64,13 @@ function stamp(d = new Date()): string {
   );
 }
 
+/**
+ * The worktree's blocking hooks live next to it under the plugin's directory, not in its
+ * git dir: inside a worktree that is `<source repo>/.git/worktrees/…`, and `core.hooksPath`
+ * would hand the source repo's absolute path to the worker (nested-repos R3).
+ */
+export const hooksDirFor = (wtPath: string): string => path.join(path.dirname(wtPath), ".hooks", path.basename(wtPath));
+
 /** git -c core.hooksPath=<dir> so the user's hooks don't run on our plumbing. */
 const quietHooks = (dir: string) => ["-c", `core.hooksPath=${dir}`];
 
@@ -73,7 +84,7 @@ export async function createWorktree(opts: {
   const repoRoot = await repoRootOf(opts.cwd);
   if (!repoRoot) throw new Error(`not a git repository: ${opts.cwd}`);
   const head = await gitOk(["rev-parse", "--verify", "HEAD"], repoRoot).catch(() => {
-    throw new Error("repository has no commits yet; make an initial commit before delegating");
+    throw new Error(`repository ${path.basename(repoRoot)} has no commits yet; make an initial commit before delegating`);
   });
   let base = head;
   if (opts.includeUncommitted) {
@@ -93,16 +104,21 @@ export async function createWorktree(opts: {
   await gitOk([...quietHooks(emptyHooks), "worktree", "add", "-b", branch, wtPath, base], repoRoot);
 
   const gitDir = await gitOk(["rev-parse", "--absolute-git-dir"], wtPath);
-  const hooksDir = path.join(gitDir, "mp-hooks");
+  const hooksDir = hooksDirFor(wtPath);
   await fs.mkdir(hooksDir, { recursive: true });
   for (const name of ["pre-commit", "pre-push", "pre-merge-commit", "pre-rebase"]) {
     await fs.writeFile(path.join(hooksDir, name), BLOCK_HOOK, { mode: 0o755 });
   }
 
   const symlinks: string[] = [];
+  const skippedSymlinks: string[] = [];
   for (const rel of opts.symlink) {
     const src = path.join(repoRoot, rel);
     const dst = path.join(wtPath, rel);
+    if (await linksSecrets(rel, src)) {
+      skippedSymlinks.push(rel);
+      continue;
+    }
     if (!existsSync(src) || existsSync(dst)) continue;
     await fs.mkdir(path.dirname(dst), { recursive: true });
     const stat = await fs.stat(src);
@@ -119,10 +135,26 @@ export async function createWorktree(opts: {
     createdAt: new Date().toISOString(),
     hooksDir,
     symlinks,
+    ...(skippedSymlinks.length ? { skippedSymlinks } : {}),
     ...(opts.sdd ? { sdd: opts.sdd } : {}),
   };
   await fs.writeFile(path.join(gitDir, META_FILE), JSON.stringify(meta, null, 2));
   return meta;
+}
+
+/**
+ * Whether a `symlink` entry would hand secrets to the worker (nested-repos R3): its name
+ * or its real target is sensitive, or it is a directory holding `.env*` files.
+ * Dependency directories (`node_modules`) are not searched: their files are packages.
+ */
+async function linksSecrets(rel: string, src: string): Promise<boolean> {
+  if (isSensitivePath(rel)) return true;
+  if (!existsSync(src)) return false;
+  const real = realOrResolved(src);
+  if (isSensitivePath(real)) return true;
+  if (path.basename(rel) === "node_modules" || !(await fs.stat(src)).isDirectory()) return false;
+  const scan = await scanSecrets(src);
+  return scan.found.length > 0 || scan.truncated;
 }
 
 /** `GIT_CONFIG_*` entries appended after any already present in env (git >= 2.31). */
@@ -148,7 +180,7 @@ export async function readMeta(worktreePath: string): Promise<WorktreeMeta> {
  * Canonical form for comparing paths: resolves symlinks (macOS lists /var as /private/var)
  * and Windows 8.3 short names (RUNNER~1 vs runneradmin) the way `git worktree list` prints them.
  */
-function realOrResolved(p: string): string {
+export function realOrResolved(p: string): string {
   try {
     return realpathSync.native(p);
   } catch {
@@ -236,6 +268,7 @@ export async function removeWorktree(meta: Pick<WorktreeMeta, "repoRoot" | "path
   const noHooks = quietHooks(path.join(worktreesDir(), ".no-hooks"));
   await git([...noHooks, "worktree", "remove", "--force", meta.path], meta.repoRoot);
   await fs.rm(meta.path, { recursive: true, force: true }).catch(() => undefined);
+  await fs.rm(hooksDirFor(meta.path), { recursive: true, force: true }).catch(() => undefined);
   await git(["worktree", "prune"], meta.repoRoot);
   if (meta.branch.startsWith("mp/")) await git(["branch", "-D", meta.branch], meta.repoRoot);
 }
@@ -300,22 +333,40 @@ async function managedWorktrees(repoRoot: string): Promise<{ path: string; branc
   });
 }
 
-/** Metadata of every live mp/* worktree of the repository (unreadable ones are skipped). */
-export async function listWorktrees(cwd: string): Promise<WorktreeMeta[]> {
-  const repoRoot = await repoRootOf(cwd);
-  if (!repoRoot) return [];
+/** The distinct repository roots of the given directories (a spec worktree and its repo stay apart). */
+async function repoRoots(dirs: string | string[]): Promise<string[]> {
+  const roots = new Map<string, string>();
+  for (const dir of typeof dirs === "string" ? [dirs] : dirs) {
+    const root = await repoRootOf(dir);
+    if (root && !roots.has(realOrResolved(root))) roots.set(realOrResolved(root), root);
+  }
+  return [...roots.values()];
+}
+
+/** Metadata of every live mp/* worktree of the repositories (unreadable ones are skipped). */
+export async function listWorktrees(dirs: string | string[]): Promise<WorktreeMeta[]> {
   const metas: WorktreeMeta[] = [];
-  for (const b of await managedWorktrees(repoRoot)) {
-    const meta = await readMeta(b.path).catch(() => undefined);
-    if (meta) metas.push(meta);
+  const seen = new Set<string>();
+  for (const repoRoot of await repoRoots(dirs)) {
+    for (const b of await managedWorktrees(repoRoot)) {
+      // Worktrees of one repo are listed by each of its checkouts: keep one entry.
+      if (seen.has(realOrResolved(b.path))) continue;
+      seen.add(realOrResolved(b.path));
+      const meta = await readMeta(b.path).catch(() => undefined);
+      if (meta) metas.push(meta);
+    }
   }
   return metas;
 }
 
-/** Remove every mp/* worktree of a repository (optionally only older than maxAgeMs). */
-export async function cleanupWorktrees(cwd: string, maxAgeMs = 0): Promise<string[]> {
-  const repoRoot = await repoRootOf(cwd);
-  if (!repoRoot) return [];
+/** Remove every mp/* worktree of the repositories (optionally only older than maxAgeMs). */
+export async function cleanupWorktrees(dirs: string | string[], maxAgeMs = 0): Promise<string[]> {
+  const removed: string[] = [];
+  for (const repoRoot of await repoRoots(dirs)) removed.push(...(await cleanupRepo(repoRoot, maxAgeMs)));
+  return removed;
+}
+
+async function cleanupRepo(repoRoot: string, maxAgeMs: number): Promise<string[]> {
   const removed: string[] = [];
   for (const b of await managedWorktrees(repoRoot)) {
     if (maxAgeMs > 0) {

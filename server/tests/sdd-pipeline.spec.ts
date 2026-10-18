@@ -2,7 +2,9 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { featureStatus, listFeatureStatus, sddFeatureStatus } from "../src/sdd/pipeline.js";
-import { tmpDir } from "./helpers.js";
+import { StateStore, registerRepo } from "../src/state.js";
+import { createWorktree } from "../src/worktree.js";
+import { makeWorkspace, tmpDir } from "./helpers.js";
 import { DELEGATION_REPORT, PLAN, SPEC, TASKS, writeFeature } from "./sdd-fixtures.js";
 
 const closed = TASKS.replace(/\[[ !]\]/g, "[x]");
@@ -149,5 +151,21 @@ describe("sdd pipeline", () => {
     ]);
     expect("features" in r && r.features[0]!.current).toEqual({ id: "T4", owner: "codex (multi-provider) since 2026-10-18" });
     expect(await sddFeatureStatus({ slug: "b" }, { projectDir: root })).toMatchObject({ slug: "b", stage: "Cerrada" });
+  });
+
+  it("nested-repos R11: sdd_feature_status sees the live worktree of a task in a registered nested repo", async () => {
+    const { root, nested } = makeWorkspace();
+    demo(root);
+    const home = tmpDir();
+    vi.stubEnv("MP_HOME", home);
+    // A recent delegation of another task makes T4's claim look orphaned unless its worktree is found.
+    writeFileSync(path.join(home, "state.json"), JSON.stringify({ version: 1, recent: [{ id: "x", sdd: { slug: "demo", taskId: "T3" } }] }));
+    await createWorktree({ cwd: nested, provider: "codex", includeUncommitted: false, symlink: [], sdd: { slug: "demo", taskId: "T4" } });
+    const codes = async (store?: StateStore) =>
+      ((await sddFeatureStatus({ slug: "demo" }, { projectDir: root, ...(store ? { store } : {}) })) as { warnings: { code: string }[] }).warnings.map((w) => w.code);
+    expect(await codes()).toContain("orphan_claim");
+    const store = new StateStore(path.join(tmpDir(), "state.json"));
+    await store.update((st) => registerRepo(st, nested));
+    expect(await codes(store)).not.toContain("orphan_claim");
   });
 });

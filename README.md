@@ -63,6 +63,7 @@ Ejemplo completo: [`config/multiprovider.example.json`](config/multiprovider.exa
 | Campo | Por defecto | Descripción |
 |---|---|---|
 | `chain` | `["codex","antigravity","claude"]` | Cadena de fallback. `claude` = devolver `fallback_to_claude` para que Claude haga la tarea. |
+| `chainByMode.read` / `chainByMode.write` | — (se usa `chain`) | Cadena propia de un modo, p. ej. `{"read":["codex","claude"]}` para que la lectura nunca caiga en agy. Mismas reglas que `chain` |
 | `routing` | `{}` | Para `provider:"auto"`. `{"review":"codex"}` o `{"refactor":{"provider":"antigravity","keywords":["refactor","refactoriza"]}}`. Coincide por inicio de palabra; si nada coincide, se usa el primero disponible de la cadena. |
 | `defaults.mode` | `"read"` | `read` o `write` |
 | `defaults.timeoutMs` | `600000` | Timeout duro por intento (modo read) |
@@ -72,15 +73,17 @@ Ejemplo completo: [`config/multiprovider.example.json`](config/multiprovider.exa
 | `defaults.maxDiffBytes` | `204800` | El diff devuelto se trunca; el patch completo queda en `~/.claude/multi-provider/patches/` |
 | `circuitBreaker.threshold` / `cooldownMs` | `3` / `300000` | Fallos consecutivos para abrir el circuito / duración del cooldown |
 | `retry` | `maxRetries 2, baseDelayMs 2000, factor 2, maxDelayMs 30000, retryOn [RATE_LIMIT, TIMEOUT]` | Backoff exponencial, solo para esos tipos de error |
-| `isolation.readMode` | `"worktree"` | En modo read también se usa un worktree desechable. `"cwd"` ejecuta directamente en el proyecto. |
+| `isolation.readMode` | `"worktree"` | En modo read también se usa un worktree desechable. `"cwd"` ejecuta directamente en el proyecto, y se rechaza con `UNSAFE_READ_MODE` si hay archivos `.env*` alcanzables. |
+| `isolation.allowCwdWithSecrets` | `false` | Deja correr `readMode: "cwd"` aunque haya `.env*` alcanzables (queda en `notes`) |
 | `isolation.includeUncommitted` | `true` | La base del worktree incluye los cambios *tracked* sin commitear (`git stash create`) |
-| `isolation.symlink` | `[]` | Directorios enlazados en el worktree (ej. `node_modules`, para poder correr lint/tests) |
+| `isolation.symlink` | `[]` | Directorios enlazados en el worktree (ej. `node_modules`, para poder correr lint/tests). Nunca se enlazan rutas de secretos (`.env*`) |
+| `isolation.symlinkByRepo` | `{}` | `symlink` por repo anidado, p. ej. `{"backend-monolith":["node_modules"]}` (ver [repos anidados](docs/nested-repos.md)) |
 | `verify.commands` | `[]` | Ej. `["npm run lint","npm test"]`. Se ejecutan sin shell dentro del worktree (hook PostToolUse) |
 | `autoDelegate.enabled` | `true` | Delegación automática en cada mensaje (`/mp-auto on\|off`) |
 | `statusline.mode` | `"compact"` | `full` / `compact` / `off` |
 | `guardrails.checkRemotePush` | `true` | Tras cada delegación, busca la rama `mp/*` en los remotos (`git ls-remote`, 10 s) y la marca como `worker_push` si un worker la publicó |
 | `card.enabled` / `card.placement` | `true` / `"side"` | Conductor header; `side` = panel al lado de la conversación, `below` = banda sobre el prompt (`/conductor lado\|abajo`) |
-| `providers.<codex\|antigravity>` | | `enabled`, `binaryPath`, `model`, `extraArgs`, `usePty`, `errorPatterns`, `timeoutMs`, `modelFlag`, `readModeArgs`, `writeModeArgs`, `versionArgs`, `authCheckArgs`, `skipGitRepoCheck` y `transport` (codex: `app-server` por defecto, o `exec`), `outputFormat` (agy: `stream-json` por defecto, `text`, `json`) |
+| `providers.<codex\|antigravity>` | | `enabled`, `binaryPath`, `model`, `extraArgs`, `usePty`, `errorPatterns`, `timeoutMs`, `modelFlag`, `readModeArgs` (agy: `["--mode","plan"]` por defecto), `writeModeArgs`, `versionArgs`, `authCheckArgs`, `skipGitRepoCheck` y `transport` (codex: `app-server` por defecto, o `exec`), `outputFormat` (agy: `stream-json` por defecto, `text`, `json`) |
 
 `errorPatterns` acepta expresiones regulares (sin distinguir mayúsculas) por tipo de error: `AUTH`, `QUOTA`, `RATE_LIMIT`. Si defines un tipo, tus patrones **reemplazan** a los incluidos para ese tipo.
 
@@ -143,6 +146,10 @@ Para features escritas con [spec-driven](https://github.com/Lucke514/spec-driven
 4. Aplicas (`delegation_apply`) o descartas (`delegation_discard` + `sdd_task_release`). Marcar la casilla y escribir `Notes` lo hace Claude tras su revisión.
 
 Detalle, formato de la respuesta y límites en [`docs/sdd-task-delegation.md`](docs/sdd-task-delegation.md).
+
+### Workspaces con repos anidados
+
+Si la raíz del proyecto es un repo de configuración y el código vive en repos anidados e ignorados (`backend-monolith/`, `web-app/`), pasa `repo` a `delegate` (`"repo": "backend-monolith"`) o pon `**Repo**: backend-monolith` en la tarea de `tasks.md`. El worktree `mp/*` se crea desde ese repo (o desde `.claude/worktrees/<slug>/<Repo>` si la spec tiene uno), el `Verify` y los gates corren allí, y `delegation_apply` deja el diff en ese repo. Los archivos ignorados como `.env` nunca están en el worktree del worker. Detalle, errores y el riesgo residual en [`docs/nested-repos.md`](docs/nested-repos.md).
 
 ### Pipeline SDD (`/sdd-status`)
 
@@ -327,7 +334,10 @@ Instalación: el formato actual de plugins **no** permite declarar `statusLine` 
 | **`PERMISSION_BLOCKED`** | agy esperó una aprobación que un run headless no puede dar. El default de write ya la evita (`--dangerously-skip-permissions`); si lo cambiaste, vuelve a ponerlo o usa `["--mode", "auto"]`. No cuenta para el breaker. |
 | **`STALLED`** | El worker no imprimió nada durante `defaults.idleTimeoutMs`. Si había cambiado archivos, el resultado es `partial` con su diff. Sube `idleTimeoutMs` si tus tareas tienen pasos largos y silenciosos. |
 | **Codex usa `exec` y no `app-server`** | `/mp-doctor` lo muestra en `codex: transport`. Actualiza codex o fija `providers.codex.transport: "exec"`. |
-| **Lint/tests fallan en el worktree por falta de dependencias** | Añade `isolation.symlink: ["node_modules"]` o un comando de instalación en `verify.commands`. |
+| **Lint/tests fallan en el worktree por falta de dependencias** | Añade `isolation.symlink: ["node_modules"]` (o `symlinkByRepo` para un repo anidado) o un comando de instalación en `verify.commands`. |
+| **El worker no ve el código (solo `specs/`, `docs/`…)** | El código está en un repo anidado e ignorado por la raíz. Pasa `repo` a `delegate` o pon `**Repo**` en la tarea; `/mp-doctor` lista los repos anidados (`workspace repos`). |
+| **`UNSAFE_READ_MODE`** | `readMode: "cwd"` dejaría al worker leer `.env*` reales. Usa `readMode: "worktree"` (por defecto) o, asumiendo el riesgo, `allowCwdWithSecrets: true`. |
+| **`REPO_INVALID` / `REPO_NOT_GIT` / `REPO_NOT_FOUND`** | `repo` o `**Repo**` no apunta a la raíz de un repo git dentro del proyecto; el mensaje dice qué regla falló y, para un subdirectorio, cuál es la raíz. |
 
 ## Limitaciones conocidas
 
@@ -341,7 +351,8 @@ Instalación: el formato actual de plugins **no** permite declarar `statusLine` 
   - el kill del árbol usa `taskkill /T /F`;
   - un `binaryPath` que apunta a un `.js`/`.mjs` se ejecuta con `node` (Windows no respeta el shebang); los binarios fake de los tests funcionan así en las tres plataformas.
 - El hook Bash limpia patrones conocidos en el texto del comando. Construcciones de shell exóticas (cuerpos generados por variables) pueden escaparse, y por eso existe además el hook `commit-msg` y el setting `attribution`.
-- Las verificaciones automáticas (`verify.commands`) corren sin shell: no admiten pipes ni `&&`. Usa un script de npm.
+- Las verificaciones automáticas (`verify.commands`) corren sin shell: no admiten pipes ni `&&`. Usa un script de npm. En un `**Verify**` de spec-driven, pon cada comando entre sus propios backticks.
+- En un repo anidado, el `.env` no está en el worktree del worker, pero el archivo `.git` del worktree apunta al repo de origen y los sandboxes de Codex y agy no impiden leer rutas absolutas fuera de él. Ver [`docs/nested-repos.md`](docs/nested-repos.md).
 
 ## CI
 

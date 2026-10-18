@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,8 +15,7 @@ export function tmpDir(prefix = "mp-"): string {
   return mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-export function makeRepo(): string {
-  const dir = tmpDir("mp-repo-");
+export function makeRepo(dir = tmpDir("mp-repo-")): string {
   const g = (...a: string[]) => execFileSync("git", a, { cwd: dir, stdio: "pipe" });
   g("init", "-q", "-b", "main");
   g("config", "user.name", "Test User");
@@ -29,6 +28,27 @@ export function makeRepo(): string {
   g("add", "-A");
   g("commit", "-qm", "init");
   return dir;
+}
+
+/**
+ * A configuration workspace (nested-repos): a root repo that ignores `backend-monolith/`,
+ * which is its own repo with a tracked package.json and an untracked `.env`.
+ */
+export function makeWorkspace(): { root: string; nested: string } {
+  const root = makeRepo(tmpDir("mp-ws-"));
+  const g = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, stdio: "pipe" });
+  writeFileSync(path.join(root, ".gitignore"), "backend-monolith/\n.claude/worktrees/\n");
+  g(root, "add", "-A");
+  g(root, "commit", "-qm", "ignore nested repos");
+  const nested = path.join(root, "backend-monolith");
+  mkdirSync(nested);
+  makeRepo(nested);
+  writeFileSync(path.join(nested, "package.json"), '{ "name": "backend-monolith" }\n');
+  writeFileSync(path.join(nested, ".gitignore"), ".env\n");
+  g(nested, "add", "-A");
+  g(nested, "commit", "-qm", "package");
+  writeFileSync(path.join(nested, ".env"), "DB_PASSWORD=prod-secret\n");
+  return { root, nested };
 }
 
 export function testConfig(overrides: Record<string, unknown> = {}): MpConfig {

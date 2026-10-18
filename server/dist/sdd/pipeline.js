@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { statePath } from "../paths.js";
+import { knownRepoDirs } from "../repo.js";
 import { listWorktrees } from "../worktree.js";
 import { parseScope, parseStatus, parseTasks, parseVerificationReports, readFeatureArtifacts, SddError } from "./artifacts.js";
 async function exists(file) {
@@ -168,7 +169,8 @@ function summarize(f) {
 }
 /** The sdd_feature_status tool: one feature in full, or a summary of every feature (R6). */
 export async function sddFeatureStatus(args, ctx) {
-    const live = (await listWorktrees(ctx.projectDir).catch(() => [])).flatMap((m) => (m.sdd ? [m.sdd] : []));
+    const repos = ctx.store ? (await ctx.store.read()).repos : undefined;
+    const live = (await listWorktrees(knownRepoDirs(ctx.projectDir, repos)).catch(() => [])).flatMap((m) => (m.sdd ? [m.sdd] : []));
     if (args.slug)
         return featureStatus(ctx.projectDir, args.slug, undefined, live);
     const all = await listFeatureStatus(ctx.projectDir, undefined, live);

@@ -1,12 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { delegate } from "../src/delegate.js";
 import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
-import { applyWorktree, cleanupWorktrees, readMeta, removeWorktree } from "../src/worktree.js";
-import { FAKE_CODEX, isAlive, makeRepo, testConfig, tmpDir } from "./helpers.js";
+import { knownRepoDirs } from "../src/repo.js";
+import { applyWorktree, cleanupWorktrees, listWorktrees, readMeta, removeWorktree } from "../src/worktree.js";
+import type { ProviderAdapter, ProviderName } from "../src/providers/types.js";
+import { FAKE_CODEX, isAlive, makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
 
@@ -311,6 +313,349 @@ describe("provider-reliability R4/R5: idle timeout and partial results", () => {
 });
 
 import { gitConfigEnv } from "../src/worktree.js";
+describe("nested-repos: delegate with repo", () => {
+  /** Adapters that record every call: SC3 needs proof that no worker started. */
+  function spyAdapters(): { calls: string[]; adapters: Record<ProviderName, ProviderAdapter> } {
+    const calls: string[] = [];
+    const make = (name: ProviderName): ProviderAdapter => ({
+      name,
+      isAvailable: async () => true,
+      healthCheck: async () => ({ installed: true, auth: "ok" }) as never,
+      run: async () => {
+        calls.push(name);
+        return { ok: true, output: "ok", exitCode: 0, durationMs: 1 };
+      },
+    });
+    return { calls, adapters: { codex: make("codex"), antigravity: make("antigravity") } };
+  }
+
+  it("R1/SC3: a repo that escapes the project or is not a git repo fails before any worktree or worker", async () => {
+    const { root } = makeWorkspace();
+    const outside = makeRepo();
+    for (const repo of ["../x", outside, "missing", ".claude"]) {
+      const spy = spyAdapters();
+      if (repo === ".claude") execFileSync(process.execPath, ["-e", `require("fs").mkdirSync(${JSON.stringify(path.join(root, ".claude"))})`]);
+      await expect(delegate({ provider: "codex", task: "t", mode: "write", repo }, { ...ctx(root), adapters: spy.adapters })).rejects.toMatchObject({
+        code: expect.stringMatching(/^REPO_(INVALID|NOT_GIT|NOT_FOUND)$/),
+      });
+      expect(spy.calls).toEqual([]);
+    }
+    expect(git(root, "worktree", "list").split("\n")).toHaveLength(1);
+    expect(git(path.join(root, "backend-monolith"), "worktree", "list").split("\n")).toHaveLength(1);
+  });
+
+  it("R2: the worktree comes from the nested repo; files resolve against it, with or without its prefix", async () => {
+    const { root, nested } = makeWorkspace();
+    const promptFile = path.join(tmpDir(), "prompt.txt");
+    process.env.FAKE_PROMPT_FILE = promptFile;
+    process.env.FAKE_MODE = "write";
+    const r = await delegate(
+      { provider: "codex", task: "add a file", mode: "write", repo: "backend-monolith", files: ["package.json", "backend-monolith/index.ts"] },
+      ctx(root),
+    );
+    delete process.env.FAKE_PROMPT_FILE;
+    expect(r.status).toBe("success");
+    expect(r.repo).toBe("backend-monolith");
+    const meta = await readMeta(r.worktreePath!);
+    expect(realpathSync(meta.repoRoot)).toBe(realpathSync(nested));
+    expect(existsSync(path.join(r.worktreePath!, "package.json"))).toBe(true);
+    expect(existsSync(path.join(r.worktreePath!, ".gitignore"))).toBe(true);
+    expect(r.filesChanged).toEqual(["added-by-worker.txt"]);
+    expect(r.files.filter((f) => f.included).map((f) => f.path)).toEqual(["package.json", "index.ts"]);
+    expect(readFileSync(promptFile, "utf8")).toContain('"name": "backend-monolith"');
+    // The branch lives in the nested repo, not in the workspace root.
+    expect(git(nested, "branch", "--list", "mp/*")).not.toBe("");
+    expect(git(root, "branch", "--list", "mp/*")).toBe("");
+
+    const applied = await applyWorktree(r.worktreePath!, "nested");
+    expect(applied.applied).toBe(true);
+    expect(existsSync(path.join(nested, "added-by-worker.txt"))).toBe(true);
+    expect(existsSync(path.join(root, "added-by-worker.txt"))).toBe(false);
+  });
+
+  it("R2: symlinkByRepo links the repo's own entries; other repos fall back to isolation.symlink", async () => {
+    const { root, nested } = makeWorkspace();
+    execFileSync(process.execPath, ["-e", `require("fs").mkdirSync(${JSON.stringify(path.join(nested, "node_modules", "dep"))}, { recursive: true })`]);
+    process.env.FAKE_MODE = "write";
+    const r = await delegate(
+      { provider: "codex", task: "t", mode: "write", repo: "backend-monolith" },
+      ctx(root, { isolation: { symlink: ["nothing-here"], symlinkByRepo: { "backend-monolith": ["node_modules"] } } }),
+    );
+    const meta = await readMeta(r.worktreePath!);
+    expect(meta.symlinks).toEqual(["node_modules"]);
+    expect(existsSync(path.join(r.worktreePath!, "node_modules", "dep"))).toBe(true);
+    expect(r.filesChanged).toEqual(["added-by-worker.txt"]);
+    await removeWorktree(meta);
+  });
+
+  it("R3/SC1: the worker sees the nested repo's tracked files, never its .env, nor the workspace's path", async () => {
+    const { root, nested } = makeWorkspace();
+    const probeFile = path.join(tmpDir(), "probe.json");
+    const promptFile = path.join(tmpDir(), "prompt.txt");
+    const pwd = process.env.PWD;
+    Object.assign(process.env, {
+      FAKE_MODE: "probe-secrets",
+      FAKE_PROBE_FILE: probeFile,
+      FAKE_PROMPT_FILE: promptFile,
+      FAKE_FORBIDDEN_PATH: [root, realpathSync(root)].join(","),
+      CLAUDE_PROJECT_DIR: root,
+      MP_PROJECT_DIR: root,
+      PWD: nested,
+    });
+    try {
+      const r = await delegate({ provider: "codex", task: "review backend-monolith", repo: "backend-monolith", files: ["package.json", ".env"] }, ctx(root));
+      expect(r.status).toBe("success");
+      const probe = JSON.parse(readFileSync(probeFile, "utf8"));
+      expect(probe.cwd).toContain("package.json");
+      expect(probe.cwd).not.toContain(".env");
+      expect(probe.packageJson.ok).toBe(true);
+      expect(probe.env).toEqual({ ok: false, code: "ENOENT" });
+      expect(probe.leaks).toEqual([]);
+      const prompt = readFileSync(promptFile, "utf8");
+      expect(prompt).not.toContain("prod-secret");
+      expect(prompt).not.toContain(root);
+      expect(prompt).not.toContain(realpathSync(root));
+      expect(r.files.find((f) => f.path === ".env")?.reason).toMatch(/sensitive/);
+    } finally {
+      for (const k of ["FAKE_PROBE_FILE", "FAKE_PROMPT_FILE", "FAKE_FORBIDDEN_PATH", "CLAUDE_PROJECT_DIR", "MP_PROJECT_DIR"]) delete process.env[k];
+      if (pwd === undefined) delete process.env.PWD;
+      else process.env.PWD = pwd;
+    }
+  });
+
+  it("R3: a symlink entry naming secrets is skipped and noted; the hooks live outside the source repo's .git", async () => {
+    const { root, nested } = makeWorkspace();
+    process.env.FAKE_MODE = "write";
+    const r = await delegate(
+      { provider: "codex", task: "t", mode: "write", repo: "backend-monolith" },
+      ctx(root, { isolation: { symlinkByRepo: { "backend-monolith": [".env", "config/.env.production"] } } }),
+    );
+    const meta = await readMeta(r.worktreePath!);
+    expect(meta.symlinks).toEqual([]);
+    expect(meta.skippedSymlinks).toEqual([".env", "config/.env.production"]);
+    expect(existsSync(path.join(r.worktreePath!, ".env"))).toBe(false);
+    expect(r.notes?.some((n) => n.includes("symlink skipped") && n.includes(".env"))).toBe(true);
+    const rel = path.relative(realpathSync(nested), realpathSync(meta.hooksDir));
+    expect(rel.startsWith("..") || path.isAbsolute(rel)).toBe(true);
+    expect(existsSync(path.join(meta.hooksDir, "pre-commit"))).toBe(true);
+    await removeWorktree(meta);
+    expect(existsSync(meta.hooksDir)).toBe(false);
+  });
+
+  it("R3: a worker in a nested repo's worktree still cannot commit", async () => {
+    const { root, nested } = makeWorkspace();
+    process.env.FAKE_MODE = "try-commit";
+    const r = await delegate({ provider: "codex", task: "t", mode: "write", repo: "backend-monolith" }, ctx(root));
+    expect(r.output).toContain("commit blocked");
+    expect(git(nested, "log", "--oneline").split("\n")).toHaveLength(2);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("E4: a tracked .env named in files stays out of the prompt", async () => {
+    const { root, nested } = makeWorkspace();
+    writeFileSync(path.join(nested, ".gitignore"), "");
+    git(nested, "add", "-A");
+    git(nested, "commit", "-qm", "track .env");
+    const promptFile = path.join(tmpDir(), "prompt.txt");
+    process.env.FAKE_PROMPT_FILE = promptFile;
+    const r = await delegate({ provider: "codex", task: "t", repo: "backend-monolith", files: ["backend-monolith/.env"] }, ctx(root));
+    delete process.env.FAKE_PROMPT_FILE;
+    expect(r.files[0]?.reason).toMatch(/sensitive/);
+    expect(readFileSync(promptFile, "utf8")).not.toContain("prod-secret");
+  });
+
+  it("R11: a nested repo is registered; listing and cleanup reach its mp/* worktrees, foreign registrations are ignored", async () => {
+    const { root, nested } = makeWorkspace();
+    const c = ctx(root);
+    process.env.FAKE_MODE = "write";
+    const r = await delegate({ provider: "codex", task: "t", mode: "write", repo: "backend-monolith", sdd: { slug: "demo", taskId: "T3" } }, c);
+    const state = await c.store.read();
+    expect(state.repos?.map((p) => realpathSync(p))).toEqual([realpathSync(nested)]);
+    // The root alone does not see it; with the registry it does.
+    expect(await listWorktrees(root)).toEqual([]);
+    const outside = makeRepo();
+    const dirs = knownRepoDirs(root, [...state.repos!, outside, path.join(root, "gone")]);
+    expect(dirs).toHaveLength(2);
+    expect((await listWorktrees(dirs)).map((m) => m.sdd)).toEqual([{ slug: "demo", taskId: "T3" }]);
+    expect((await cleanupWorktrees(dirs)).map((p) => path.basename(p))).toEqual([path.basename(r.worktreePath!)]);
+    expect(existsSync(r.worktreePath!)).toBe(false);
+    expect(git(nested, "branch", "--list", "mp/*")).toBe("");
+  });
+
+  it("R6/SC4: readMode cwd with a reachable .env is refused before any worker; allowCwdWithSecrets runs it with a note", async () => {
+    const { root } = makeWorkspace();
+    const spy = spyAdapters();
+    const cfg = { isolation: { readMode: "cwd" } };
+    const err = await delegate({ provider: "codex", task: "t" }, { ...ctx(root, cfg), adapters: spy.adapters }).catch((e) => e);
+    expect(err).toMatchObject({ code: "UNSAFE_READ_MODE" });
+    expect(err.message).toContain("backend-monolith/.env");
+    expect(spy.calls).toEqual([]);
+    // The same through repo: the scan covers the repo's own tree.
+    await expect(delegate({ provider: "codex", task: "t", repo: "backend-monolith" }, { ...ctx(root, cfg), adapters: spy.adapters })).rejects.toMatchObject({
+      code: "UNSAFE_READ_MODE",
+    });
+    expect(spy.calls).toEqual([]);
+    const ok = await delegate({ provider: "codex", task: "t" }, { ...ctx(root, { isolation: { readMode: "cwd", allowCwdWithSecrets: true } }), adapters: spy.adapters });
+    expect(ok.status).toBe("success");
+    expect(spy.calls).toEqual(["codex"]);
+    expect(ok.notes?.some((n) => n.includes("allowCwdWithSecrets") && n.includes("backend-monolith/.env"))).toBe(true);
+    // A tree without .env files runs in cwd as before.
+    expect((await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo(), cfg), adapters: spyAdapters().adapters })).status).toBe("success");
+  });
+
+  it("G2: an empty repo is rejected; a repo prefix is stripped once, from files and scopeFiles alike", async () => {
+    const { root, nested } = makeWorkspace();
+    await expect(delegate({ provider: "codex", task: "t", repo: "" }, ctx(root))).rejects.toMatchObject({ code: "REPO_INVALID" });
+    execFileSync(process.execPath, ["-e", `require("fs").mkdirSync(${JSON.stringify(path.join(nested, "backend-monolith"))})`]);
+    writeFileSync(path.join(nested, "backend-monolith", "inner.ts"), "export const inner = 1;\n");
+    git(nested, "add", "-A");
+    git(nested, "commit", "-qm", "inner dir named like the repo");
+    process.env.FAKE_MODE = "write";
+    const r = await delegate(
+      {
+        provider: "codex",
+        task: "t",
+        mode: "write",
+        repo: "backend-monolith",
+        files: ["backend-monolith/backend-monolith/inner.ts"],
+        scopeFiles: ["backend-monolith/added-by-worker.txt"],
+      },
+      ctx(root),
+    );
+    expect(r.files.find((f) => f.included)?.path).toBe("backend-monolith/inner.ts");
+    expect(r.violations).toBeUndefined();
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("G4: secrets reached through symlinks never get in: files, symlink entries; PATH loses the source paths", async () => {
+    const { root, nested } = makeWorkspace();
+    const kind = process.platform === "win32" ? "junction" : "dir";
+    // A tracked-looking file that points at the .env, and a directory holding an ignored secret.
+    symlinkSync(path.join(nested, ".env"), path.join(nested, "settings.txt"));
+    mkdirSync(path.join(nested, "config"));
+    writeFileSync(path.join(nested, "config", ".env.production"), "PROD=1\n");
+    symlinkSync(path.join(nested, "config"), path.join(nested, "conf-link"), kind);
+    mkdirSync(path.join(nested, "node_modules", "dotenv-example"), { recursive: true });
+    writeFileSync(path.join(nested, "node_modules", "dotenv-example", ".env"), "EXAMPLE=1\n");
+    const promptFile = path.join(tmpDir(), "prompt.txt");
+    const probeFile = path.join(tmpDir(), "probe.json");
+    const pathKeyName = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+    const pathBefore = process.env[pathKeyName];
+    Object.assign(process.env, {
+      FAKE_PROMPT_FILE: promptFile,
+      FAKE_MODE: "probe-secrets",
+      FAKE_PROBE_FILE: probeFile,
+      FAKE_FORBIDDEN_PATH: [root, realpathSync(root)].join(","),
+      [pathKeyName]: [path.join(nested, "node_modules", ".bin"), pathBefore].join(path.delimiter),
+    });
+    try {
+      const r = await delegate(
+        { provider: "codex", task: "t", repo: "backend-monolith", files: ["settings.txt"] },
+        ctx(root, { isolation: { symlinkByRepo: { "backend-monolith": ["config", "conf-link", "node_modules"] } } }),
+      );
+      expect(r.files[0]).toMatchObject({ included: false, reason: expect.stringMatching(/sensitive/) });
+      expect(readFileSync(promptFile, "utf8")).not.toContain("prod-secret");
+      expect(r.notes?.find((n) => n.startsWith("symlink skipped"))).toContain("config, conf-link");
+      const probe = JSON.parse(readFileSync(probeFile, "utf8"));
+      expect(probe.cwd).toContain("node_modules");
+      expect(probe.cwd).not.toContain("config");
+      expect(probe.leaks).toEqual([]);
+    } finally {
+      process.env[pathKeyName] = pathBefore;
+      for (const k of ["FAKE_PROMPT_FILE", "FAKE_PROBE_FILE", "FAKE_FORBIDDEN_PATH"]) delete process.env[k];
+    }
+  });
+
+  it("E1: a nested repo without commits names the repo", async () => {
+    const root = makeRepo();
+    const empty = path.join(root, "fresh");
+    execFileSync("git", ["init", "-q", empty]);
+    process.env.FAKE_MODE = "write";
+    await expect(delegate({ provider: "codex", task: "t", mode: "write", repo: "fresh" }, ctx(root))).rejects.toThrow(/repository fresh has no commits yet/);
+  });
+
+  it("E6: two repos get two worktree directories", async () => {
+    const { root } = makeWorkspace();
+    const other = path.join(root, "web-app");
+    execFileSync(process.execPath, ["-e", `require("fs").mkdirSync(${JSON.stringify(other)})`]);
+    makeRepo(other);
+    process.env.FAKE_MODE = "write";
+    const a = await delegate({ provider: "codex", task: "t", mode: "write", repo: "backend-monolith" }, ctx(root));
+    const b = await delegate({ provider: "codex", task: "t", mode: "write", repo: "web-app" }, ctx(root));
+    expect(path.dirname(a.worktreePath!)).not.toBe(path.dirname(b.worktreePath!));
+    await removeWorktree(await readMeta(a.worktreePath!));
+    await removeWorktree(await readMeta(b.worktreePath!));
+  });
+});
+
+describe("nested-repos R8: chainByMode", () => {
+  /** Codex fails with AUTH; antigravity answers. Records who was called. */
+  function adapters() {
+    const calls: string[] = [];
+    const make = (name: ProviderName, ok: boolean): ProviderAdapter => ({
+      name,
+      isAvailable: async () => true,
+      healthCheck: async () => ({}) as never,
+      run: async () => {
+        calls.push(name);
+        return ok
+          ? { ok: true, output: "## Summary\nok", exitCode: 0, durationMs: 1 }
+          : { ok: false, output: "", exitCode: 1, durationMs: 1, error: { type: "AUTH", message: "401 Unauthorized" } };
+      },
+    });
+    return { calls, adapters: { codex: make("codex", false), antigravity: make("antigravity", true) } };
+  }
+  const byMode = { chainByMode: { read: ["codex", "claude"] } };
+
+  it("SC5: with chainByMode.read [codex, claude] and codex down, read falls back to claude and never calls agy", async () => {
+    const a = adapters();
+    const r = await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo(), byMode), adapters: a.adapters });
+    expect(r.status).toBe("fallback_to_claude");
+    expect(a.calls).toEqual(["codex"]);
+  });
+
+  it("the write chain stays `chain`; a read chain without claude ends failed; no chainByMode keeps today's order", async () => {
+    let a = adapters();
+    const w = await delegate({ provider: "codex", task: "t", mode: "write" }, { ...ctx(makeRepo(), byMode), adapters: a.adapters });
+    expect(a.calls).toEqual(["codex", "antigravity"]);
+    expect(w.provider).toBe("antigravity");
+    a = adapters();
+    const f = await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo(), { chainByMode: { read: ["codex"] } }), adapters: a.adapters });
+    expect(f.status).toBe("failed");
+    a = adapters();
+    await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo()), adapters: a.adapters });
+    expect(a.calls).toEqual(["codex", "antigravity"]);
+  });
+
+  it("R9/SC6: a fallback answer carries requestedProvider and an explicit note; a direct one carries no note", async () => {
+    const a = adapters();
+    const r = await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo()), adapters: a.adapters });
+    expect(r).toMatchObject({ requestedProvider: "codex", provider: "antigravity", status: "success" });
+    expect(r.notes).toContain("requested codex, answered by antigravity (fallback after codex: AUTH)");
+    const auto = await delegate({ provider: "auto", task: "t" }, { ...ctx(makeRepo()), adapters: adapters().adapters });
+    expect(auto.requestedProvider).toBe("auto");
+    expect(auto.notes).toContain("requested codex, answered by antigravity (fallback after codex: AUTH)");
+    const direct = await delegate({ provider: "antigravity", task: "t" }, { ...ctx(makeRepo()), adapters: adapters().adapters });
+    expect(direct.requestedProvider).toBe("antigravity");
+    expect(direct.notes ?? []).not.toContainEqual(expect.stringContaining("answered by"));
+  });
+
+  it("an explicit provider outside the mode's chain is tried first; an auto route outside it is ignored with a note", async () => {
+    let a = adapters();
+    const r = await delegate({ provider: "antigravity", task: "t" }, { ...ctx(makeRepo(), byMode), adapters: a.adapters });
+    expect(a.calls).toEqual(["antigravity"]);
+    expect(r.status).toBe("success");
+    a = adapters();
+    const auto = await delegate(
+      { provider: "auto", task: "refactor this", taskType: "refactor" },
+      { ...ctx(makeRepo(), { ...byMode, routing: { refactor: "antigravity" } }), adapters: a.adapters },
+    );
+    expect(a.calls).toEqual(["codex"]);
+    expect(auto.routing).toBeUndefined();
+    expect(auto.notes?.some((n) => n.includes("not in the read chain"))).toBe(true);
+  });
+});
+
 describe("gitConfigEnv", () => {
   it("appends to existing GIT_CONFIG_* entries", () => {
     const hooks: [string, string][] = [["core.hooksPath", "/h"]];

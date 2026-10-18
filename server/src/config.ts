@@ -41,6 +41,10 @@ const RoutingTarget = z.union([
 
 export const ConfigSchema = z.object({
   chain: z.array(ChainEntry).min(1).default(["codex", "antigravity", "claude"]),
+  /** Per-mode chains that replace `chain` in that mode (nested-repos R8), e.g. read: ["codex", "claude"]. */
+  chainByMode: z
+    .object({ read: z.array(ChainEntry).min(1).optional(), write: z.array(ChainEntry).min(1).optional() })
+    .prefault({}),
   routing: z.record(z.string(), RoutingTarget).default({}),
   defaults: z
     .object({
@@ -78,6 +82,10 @@ export const ConfigSchema = z.object({
       includeUncommitted: z.boolean().default(true),
       /** Directories symlinked from the repo into each worktree (e.g. node_modules). */
       symlink: z.array(z.string()).default([]),
+      /** Per-repo `symlink` for delegations with `repo` (key: the repo path relative to the project). */
+      symlinkByRepo: z.record(z.string(), z.array(z.string())).default({}),
+      /** Let readMode "cwd" run although `.env*` files are reachable from the worker's directory (R6). */
+      allowCwdWithSecrets: z.boolean().default(false),
     })
     .prefault({}),
   verify: z

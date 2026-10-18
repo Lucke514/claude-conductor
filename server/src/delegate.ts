@@ -1,12 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { appendAudit } from "./audit.js";
 import type { MpConfig } from "./config.js";
-import { resolveOrder, routeTask, runChain, type Attempt, type ChainEntry } from "./fallback.js";
+import { chainFor, resolveOrder, routeTask, runChain, type Attempt, type ChainEntry } from "./fallback.js";
 import { repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
 import { PROVIDER_NAMES, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
-import { recordCall, recordRecent, taskLabel, type StateStore } from "./state.js";
+import { RepoError, resolveRepo } from "./repo.js";
+import { scanSecrets } from "./secrets-scan.js";
+import { recordCall, recordRecent, registerRepo, taskLabel, type StateStore } from "./state.js";
 import type { JobRegistry } from "./jobs.js";
 import { checkRemotePush, type PushViolation } from "./remote-check.js";
 import { ensureShims, workerEnv } from "./worker-env.js";
@@ -21,6 +23,10 @@ export interface DelegateParams {
   model?: string;
   taskType?: string;
   fallback?: boolean;
+  /** Code repository to work on, relative to the project (a nested repo); default: the project's own repo. */
+  repo?: string;
+  /** The repo's name when `repo` is a longer path (an SDD task's `**Repo**` resolved to its spec worktree): `symlinkByRepo` key and accepted `files` prefix. */
+  repoName?: string;
   /** Files the task may change (an entry ending in `/` covers a directory); anything else is reported as drift. */
   scopeFiles?: string[];
   /** Extra "Expected output" lines for the worker (e.g. the SDD Acceptance section). */
@@ -34,10 +40,14 @@ export type DelegateStatus = "success" | "fallback_to_claude" | "failed" | "canc
 
 export interface DelegateResponse {
   id: string;
+  /** What was asked for: `auto`, the explicit provider, or (sdd_task_delegate) the Owner's (nested-repos R9). */
+  requestedProvider: ProviderName | "auto";
   provider: ProviderName | null;
   model: string | null;
   status: DelegateStatus;
   mode: Mode;
+  /** The `repo` the delegation worked on (relative to the project), when one was given. */
+  repo?: string;
   output: string;
   diff?: string;
   diffTruncated?: boolean;
@@ -99,6 +109,17 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
   const mode: Mode = params.mode ?? config.defaults.mode;
   const timeoutMs = params.timeoutMs ?? (mode === "write" ? config.defaults.writeTimeoutMs : config.defaults.timeoutMs);
   const sessionKey = params.sessionId ?? ctx.instanceId;
+  // R1: an invalid repo fails before any job, worktree or worker exists.
+  const target = params.repo !== undefined ? await resolveRepo(ctx.projectDir, params.repo) : undefined;
+  const codeDir = target?.root ?? ctx.projectDir;
+  // Paths may carry the repo's prefix (`backend-monolith/src/x.ts`): strip one, once.
+  const prefixes = target ? [target.rel, params.repoName].filter((p): p is string => Boolean(p)).map((p) => `${p}/`) : [];
+  const inRepo = (files: string[] | undefined) =>
+    files?.map((f) => {
+      const norm = f.replace(/\\/g, "/");
+      const prefix = prefixes.find((p) => norm.startsWith(p));
+      return prefix ? norm.slice(prefix.length) : f;
+    });
   // The job's controller follows the MCP request's signal and delegation_cancel alike.
   const signal = ctx.jobs
     ? ctx.jobs.start({ id, provider: null, mode, task: taskLabel(params.task), ...(params.sdd ? { sdd: params.sdd } : {}) }, ctx.signal).signal
@@ -114,16 +135,19 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     const built = await buildPrompt({
       task: params.task,
       mode,
-      files: params.files ?? [],
-      projectDir: ctx.projectDir,
+      files: inRepo(params.files) ?? [],
+      projectDir: codeDir,
       maxFileBytes: config.defaults.maxFileBytes,
       maxTotalBytes: config.defaults.maxTotalBytes,
       ...(params.extraOutput ? { extraOutput: params.extraOutput } : {}),
     });
 
-    const routing = params.provider === "auto" ? routeTask(params.task, config.routing, params.taskType) : undefined;
+    const chain = chainFor(config, mode);
+    const routed = params.provider === "auto" ? routeTask(params.task, config.routing, params.taskType) : undefined;
+    // R8: a route to a provider outside this mode's chain is ignored; an explicit provider is still tried first.
+    const routing = routed && chain.includes(routed.provider) ? routed : undefined;
     const first = params.provider === "auto" ? routing?.provider : params.provider;
-    const order: ChainEntry[] = resolveOrder(config.chain, first, params.provider === "auto" ? true : (params.fallback ?? true));
+    const order: ChainEntry[] = resolveOrder(chain, first, params.provider === "auto" ? true : (params.fallback ?? true));
 
     const adapters = ctx.adapters ?? makeAdapters(config);
     const breaker = makeBreaker(config);
@@ -132,10 +156,27 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
 
     const violations: NonNullable<DelegateResponse["violations"]> = [];
     const notes: string[] = [];
+    if (routed && !routing) notes.push(`routing rule '${routed.rule}' points to ${routed.provider}, which is not in the ${mode} chain (${chain.join(" → ")}); ignored`);
     let kept: { meta: WorktreeMeta; changes: Changes } | undefined;
 
-    const repoRoot = await repoRootOf(ctx.projectDir);
+    const repoRoot = target?.root ?? (await repoRootOf(ctx.projectDir));
+    // R11: remember the nested repo so cleanup and status find its mp/* worktrees.
+    if (target) await ctx.store.update((s) => registerRepo(s, target.root)).catch(() => undefined);
     const isolate = mode === "write" || config.isolation.readMode === "worktree";
+    if (!isolate) {
+      // R6: without a worktree the worker reads the real tree; refuse while it holds reachable .env files.
+      const scan = await scanSecrets(codeDir);
+      if (scan.found.length > 0 || scan.truncated) {
+        const what = scan.found.length > 0 ? `.env files are reachable (${scan.found.join(", ")}${scan.truncated ? ", …" : ""})` : "the scan for .env files hit its limit";
+        if (!config.isolation.allowCwdWithSecrets) {
+          throw new RepoError(
+            "UNSAFE_READ_MODE",
+            `isolation.readMode "cwd" refused: ${what}. Use readMode "worktree" (ignored files never reach the worker), or set isolation.allowCwdWithSecrets: true to accept the risk. No worker was started.`,
+          );
+        }
+        notes.push(`readMode "cwd" ran although ${what} (isolation.allowCwdWithSecrets: true)`);
+      }
+    }
     if (mode === "write" && !repoRoot) {
       return finish({
         provider: null,
@@ -156,21 +197,24 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
           cwd: repoRoot,
           provider,
           includeUncommitted: config.isolation.includeUncommitted,
-          symlink: config.isolation.symlink,
+          symlink:
+            (target && (config.isolation.symlinkByRepo[target.rel] ?? (params.repoName ? config.isolation.symlinkByRepo[params.repoName] : undefined))) ??
+            config.isolation.symlink,
           ...(params.sdd ? { sdd: params.sdd } : {}),
         });
       }
+      if (meta?.skippedSymlinks) notes.push(`symlink skipped (credentials/secrets are never linked into a worktree): ${meta.skippedSymlinks.join(", ")}`);
       ctx.jobs?.setProvider(id, provider, meta);
       const model = provider === params.provider ? params.model : undefined;
       let result: ProviderResult;
       try {
         result = await adapter.run({
           prompt: built.prompt,
-          cwd: meta?.path ?? ctx.projectDir,
+          cwd: meta?.path ?? codeDir,
           mode,
           timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
           ...(model ? { model } : {}),
-          env: workerEnv(meta),
+          env: workerEnv(meta, process.env, [ctx.projectDir, ...(repoRoot ? [repoRoot] : [])]),
           ...(signal ? { signal } : {}),
           ...(ctx.jobs ? { onProgress: (chunk: string) => ctx.jobs?.progress(id, chunk) } : {}),
           idleTimeoutMs: config.defaults.idleTimeoutMs,
@@ -195,7 +239,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
           });
         }
         if (params.scopeFiles && mode === "write" && changes.files.length > 0) {
-          const outside = outsideScope(changes.files, params.scopeFiles);
+          const outside = outsideScope(changes.files, inRepo(params.scopeFiles)!);
           if (outside.length > 0) {
             violations.push({
               type: "outside_task_files",
@@ -261,13 +305,22 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     ): Promise<DelegateResponse> {
       const response: DelegateResponse = {
         id,
+        requestedProvider: params.provider,
         mode,
+        ...(target ? { repo: target.rel } : {}),
         files: built.files,
         durationMs: Date.now() - started,
         nextSteps: [],
         ...r,
       };
       if (routing) response.routing = { rule: routing.rule, provider: routing.provider };
+      // R9: say plainly when another provider answered, so reports never credit the one asked for.
+      const expected = params.provider === "auto" ? (routing?.provider ?? order.find((p): p is ProviderName => p !== "claude")) : params.provider;
+      if (r.provider && expected && r.provider !== expected) {
+        const failed = r.attempts.find((a) => a.provider === expected);
+        const why = failed?.errorType ?? failed?.skipped;
+        notes.push(`requested ${expected}, answered by ${r.provider} (fallback${why ? ` after ${expected}: ${why}` : ""})`);
+      }
       if (kept && (r.status === "success" || r.status === "cancelled" || r.status === "partial")) {
         response.diff = kept.changes.diff;
         response.diffTruncated = kept.changes.truncated;

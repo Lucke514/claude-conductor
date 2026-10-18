@@ -51,6 +51,7 @@ export function parseTasks(text) {
         const files = field(block, "Files");
         const component = field(block, "Component");
         const verify = field(block, "Verify");
+        const repo = field(block, "Repo")?.replace(/^`|`$/g, "");
         const task = {
             id: h[2],
             title: (h[4] ?? "").trim(),
@@ -71,6 +72,8 @@ export function parseTasks(text) {
         }
         if (verify)
             task.verify = verify;
+        if (!unclaimed(repo))
+            task.repo = repo;
         tasks.push(task);
     }
     return tasks;

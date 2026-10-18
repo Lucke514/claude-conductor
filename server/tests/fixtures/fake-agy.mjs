@@ -13,7 +13,7 @@ if (args[0] === "--version") {
 }
 if (args[0] === "--help") {
   // An old agy (FAKE_AGY_HELP=old) lists neither flag the defaults rely on.
-  process.stdout.write(process.env.FAKE_AGY_HELP === "old" ? "Usage: agy -p <prompt>\n" : "  --dangerously-skip-permissions  Auto-approve\n  --output-format  (text, json, stream-json)\n");
+  process.stdout.write(process.env.FAKE_AGY_HELP === "old" ? "Usage: agy -p <prompt>\n" : "  --dangerously-skip-permissions  Auto-approve\n  --mode  Set the agent execution mode for this session (accept-edits, auto, plan)\n  --output-format  (text, json, stream-json)\n");
   process.exit(0);
 }
 if (process.env.FAKE_ARGS_FILE) writeFileSync(process.env.FAKE_ARGS_FILE, JSON.stringify({ args, tty: !!process.stdout.isTTY }));

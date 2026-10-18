@@ -45,6 +45,12 @@ Claude Code is always the **orchestrator and supervisor**. Workers (Codex via `c
    - **Discard** → `delegation_discard(worktreePath)`.
 5. `mp/*` branches are never merged; worktrees are removed on apply/discard (stale ones after 24 h).
 
+## Nested repos (multi-repo workspaces)
+
+When the project root is a configuration repo and the code lives in nested, ignored repos (`backend-monolith/`, `web-app/`), pass `repo` to `delegate` (`"repo": "backend-monolith"`, relative to the project): the worktree is created from that repo and `files` resolve against it. Without `repo` the worker would only see the root. Spec-driven tasks carry `**Repo**: <name>` and `sdd_task_*` resolve it themselves (the spec's `.claude/worktrees/<slug>/<Repo>` first). Ignored files such as `.env` never reach the worker's worktree; `readMode: "cwd"` refuses with `UNSAFE_READ_MODE` while `.env*` files are reachable.
+
+Always report the provider that actually answered: `provider` is it, `requestedProvider` is what was asked, and a `requested X, answered by Y` note marks a fallback.
+
 ## Spec-driven tasks
 
 When the work is a task of a spec-driven feature (`specs/<slug>/tasks.md` with approved spec, plan and tasks), use `/sdd-delegate <slug> <T#|next>` instead of writing a brief by hand: `sdd_task_claim` writes the task's `**Owner**`, you commit that claim, and `sdd_task_delegate` builds the brief from the artifacts, runs the task's `Verify` and the plan's gates in the worktree, and returns per-criterion verdicts plus a `Notes` draft. On discard, `sdd_task_release` hands the task back. Ticking the box and writing `Notes` stay yours, after your own review.

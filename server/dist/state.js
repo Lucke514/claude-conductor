@@ -47,6 +47,10 @@ export class StateStore {
         });
     }
 }
+export function registerRepo(s, repoRoot) {
+    if (!(s.repos ??= []).includes(repoRoot))
+        s.repos.push(repoRoot);
+}
 function pruneSessions(s) {
     const entries = Object.entries(s.sessions);
     if (entries.length <= MAX_SESSIONS)

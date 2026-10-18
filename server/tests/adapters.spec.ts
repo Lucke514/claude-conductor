@@ -96,8 +96,8 @@ describe("AntigravityAdapter", () => {
     expect(r.ok).toBe(true);
     expect(r.output).toContain("## Summary");
     const { args } = JSON.parse(readFileSync(process.env.FAKE_ARGS_FILE, "utf8"));
-    // provider-reliability: stream-json is the default output format.
-    expect(args).toEqual(["--model", "gemini-x", "--output-format", "stream-json", "-p", "do the thing\nline 2"]);
+    // provider-reliability: stream-json is the default output format; nested-repos R7: read mode plans only.
+    expect(args).toEqual(["--model", "gemini-x", "--output-format", "stream-json", "--mode", "plan", "-p", "do the thing\nline 2"]);
   });
 
   it("PTY mode: the CLI sees a TTY (works around the -p no-TTY hang) and output is ANSI-free", async () => {
@@ -152,6 +152,18 @@ describe("AntigravityAdapter", () => {
     expect(JSON.parse(readFileSync(process.env.FAKE_ARGS_FILE, "utf8")).args).not.toContain("--dangerously-skip-permissions");
     await agy({ writeModeArgs: [] }).run(req(dir, "write"));
     expect(JSON.parse(readFileSync(process.env.FAKE_ARGS_FILE, "utf8")).args).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("nested-repos R7: read mode runs agy with --mode plan by default; an explicit readModeArgs replaces it", async () => {
+    const dir = tmpDir();
+    process.env.FAKE_ARGS_FILE = path.join(dir, "args.json");
+    const args = () => JSON.parse(readFileSync(process.env.FAKE_ARGS_FILE!, "utf8")).args as string[];
+    await agy({}).run(req(dir, "read"));
+    expect(args().join(" ")).toContain("--mode plan");
+    await agy({}).run(req(dir, "write"));
+    expect(args()).not.toContain("plan");
+    await agy({ readModeArgs: [] }).run(req(dir, "read"));
+    expect(args()).not.toContain("--mode");
   });
 
   it("E6: agy in text mode forwards no output to progress; codex exec forwards event labels only", async () => {

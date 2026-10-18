@@ -51,7 +51,15 @@ async function run(cwd, command, timeoutMs) {
         outputTail: (r.spawnError ? r.spawnError.message : r.timedOut ? `timed out after ${timeoutMs}ms\n${text}` : text).slice(-1500),
     };
 }
-export async function verifyTask(worktreePath, task, gates, timeoutMs) {
+/** The repo a gate's `Where` names, when it is a repo of the workspace other than the task's (R5 of nested-repos). */
+function otherRepo(where, repos) {
+    const name = where.replace(/`/g, "").trim().replace(/\/+$/, "");
+    // A task without **Repo** behaves as before nested-repos: every gate runs.
+    if (!repos.repo)
+        return undefined;
+    return name && name !== repos.repo && repos.workspaceRepos?.includes(name) ? name : undefined;
+}
+export async function verifyTask(worktreePath, task, gates, timeoutMs, repos = {}) {
     const items = [];
     if (task.verifyCommands.length === 0) {
         items.push({ kind: "verify", command: task.verify ?? "—", result: "manual", reason: "the task's Verify is a manual check" });
@@ -62,6 +70,11 @@ export async function verifyTask(worktreePath, task, gates, timeoutMs) {
         for (const command of g.commands) {
             if (g.pipelineOnly) {
                 items.push({ kind: "gate", gate: g.gate, command, result: "manual", reason: "pipeline-only gate: read it from CI on this change set", baseline: g.baseline });
+                continue;
+            }
+            const elsewhere = otherRepo(g.where, repos);
+            if (elsewhere) {
+                items.push({ kind: "gate", gate: g.gate, command, result: "manual", reason: `runs in ${elsewhere}, not in this task's repo: run it there yourself`, baseline: g.baseline });
                 continue;
             }
             const r = await run(worktreePath, command, timeoutMs);
