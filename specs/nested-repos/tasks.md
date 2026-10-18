@@ -3,7 +3,7 @@
 # Tasks: Delegación sobre repos anidados (workspace multi-repo)
 
 > Spec: [spec.md](./spec.md) · Plan: [plan.md](./plan.md)
-> Status: in-review
+> Status: approved
 > Last updated: 2026-10-18
 
 Una tarea = una sesión. Hecha significa:
@@ -19,7 +19,7 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
 ## T1 — Repo destino validado en `delegate`
 
 - [ ] Open
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C1 · **Implements**: R1, R2, E1, E2, E6
 - **Files**: `server/src/repo.ts`, `server/src/delegate.ts`, `server/src/prompt-builder.ts`, `server/src/worktree.ts`, `server/src/index.ts`, `server/src/config.ts`, `server/tests/repo.spec.ts`, `server/tests/delegate.spec.ts`, `server/tests/helpers.ts`
 - **Do**:

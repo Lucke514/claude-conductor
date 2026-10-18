@@ -114,6 +114,7 @@ workspace/                      ← repo git (config + specs), CLAUDE_PROJECT_DI
 - 2026-10-18 Q1: opción (a). La garantía de R3 es a nivel de cwd, con la instrucción en el prompt y el aviso del riesgo residual en `/mp-doctor` y en la documentación. Una denegación de lectura a nivel de sistema operativo queda para otra spec. Elegida por el usuario.
 - 2026-10-18 Spec aprobada por el usuario, con las propuestas de arriba.
 - 2026-10-18 Plan aprobado por el usuario; integración por merge local a `main` sin PR, como 0.2.0 y 0.3.0.
+- 2026-10-18 Tasks aprobadas por el usuario; pidió ir rápido sin perder calidad.
 
 ## Open questions
 
