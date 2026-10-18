@@ -18,6 +18,9 @@ import type { HealthReport, ProviderAdapter, ProviderRequest, ProviderResult, To
  */
 
 /** Conservative argv limits (Windows command line is 32767 chars total). */
+/** Write mode runs in a disposable worktree without git/GitHub credentials (sdd-guardrails R4/R5). */
+export const DEFAULT_WRITE_ARGS = ["--dangerously-skip-permissions"];
+
 const MAX_ARG_PROMPT = process.platform === "win32" ? 24_000 : 100_000;
 
 export interface AgyJson {
@@ -85,7 +88,8 @@ export class AntigravityAdapter implements ProviderAdapter {
     const model = req.model ?? this.cfg.model;
     if (model) args.push(this.cfg.modelFlag ?? "--model", model);
     if (this.cfg.outputFormat === "json") args.push("--output-format", "json");
-    args.push(...((req.mode === "write" ? this.cfg.writeModeArgs : this.cfg.readModeArgs) ?? []));
+    // Headless write mode cannot answer permission prompts: skip them inside the isolated worktree (R2).
+    args.push(...((req.mode === "write" ? (this.cfg.writeModeArgs ?? DEFAULT_WRITE_ARGS) : this.cfg.readModeArgs) ?? []));
     args.push(...this.cfg.extraArgs);
     args.push("-p", prompt);
     return args;
@@ -114,6 +118,7 @@ export class AntigravityAdapter implements ProviderAdapter {
         usePty: this.cfg.usePty ?? true,
         ...(req.signal ? { signal: req.signal } : {}),
         ...(req.onProgress ? { onOutput: req.onProgress } : {}),
+        ...(req.idleTimeoutMs ? { idleTimeoutMs: req.idleTimeoutMs } : {}),
       });
       notes.push(...r.notes);
       const model = req.model ?? this.cfg.model;

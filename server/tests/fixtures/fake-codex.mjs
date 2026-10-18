@@ -61,6 +61,12 @@ process.stdin.on("end", () => {
       setInterval(() => {}, 1000);
       break;
     }
+    case "stall": {
+      // Reports once, then goes silent without touching any file (idle / total timeout tests).
+      out({ type: "item.completed", item: { id: "i1", type: "reasoning", text: "thinking" } });
+      setInterval(() => {}, 1000);
+      break;
+    }
     case "probe": {
       // Behaves like a worker trying to publish: dumps its env, runs gh, pushes past the hooks.
       const run = (cmd, a) => {

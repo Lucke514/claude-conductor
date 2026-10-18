@@ -66,7 +66,7 @@ export interface Attempt {
   durationMs?: number;
 }
 
-export type ChainStatus = "success" | "fallback_to_claude" | "failed" | "cancelled";
+export type ChainStatus = "success" | "fallback_to_claude" | "failed" | "cancelled" | "partial";
 
 export interface ChainOutcome {
   status: ChainStatus;
@@ -91,6 +91,11 @@ export interface ChainDeps {
   onAttempt?: (provider: ProviderName, result: ProviderResult) => Promise<void> | void;
   /** Once aborted, no further attempt starts and the outcome is `cancelled`. */
   signal?: AbortSignal;
+  /**
+   * True when a failed attempt left work worth keeping (a write that timed out or stalled
+   * with changes): the chain stops with `partial` instead of retrying or moving on (R5).
+   */
+  shouldStop?: (provider: ProviderName, result: ProviderResult) => boolean;
 }
 
 const NO_RETRY: ErrorType[] = ["AUTH", "NOT_INSTALLED", "QUOTA"];
@@ -155,6 +160,10 @@ export async function runChain(order: ChainEntry[], deps: ChainDeps): Promise<Ch
       if (type === "CANCELLED" || deps.signal?.aborted) {
         attempts.push({ provider: entry, errorType: "CANCELLED", error: "cancelled", durationMs: result.durationMs });
         return cancelled(entry, result);
+      }
+      if (deps.shouldStop?.(entry, result)) {
+        attempts.push({ provider: entry, errorType: type, error: result.error?.message ?? type, durationMs: result.durationMs });
+        return { status: "partial", provider: entry, result, attempts, summary: `${entry}: ${type} with changes in its worktree; kept as a partial result` };
       }
       if (isAttributable(type)) deps.breaker.onFailure(entry);
       attempts.push({

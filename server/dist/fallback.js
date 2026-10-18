@@ -101,6 +101,10 @@ export async function runChain(order, deps) {
                 attempts.push({ provider: entry, errorType: "CANCELLED", error: "cancelled", durationMs: result.durationMs });
                 return cancelled(entry, result);
             }
+            if (deps.shouldStop?.(entry, result)) {
+                attempts.push({ provider: entry, errorType: type, error: result.error?.message ?? type, durationMs: result.durationMs });
+                return { status: "partial", provider: entry, result, attempts, summary: `${entry}: ${type} with changes in its worktree; kept as a partial result` };
+            }
             if (isAttributable(type))
                 deps.breaker.onFailure(entry);
             attempts.push({

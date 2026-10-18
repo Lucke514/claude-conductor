@@ -126,6 +126,7 @@ export class CodexAdapter implements ProviderAdapter {
       usePty: this.cfg.usePty ?? false,
       ...(req.signal ? { signal: req.signal } : {}),
       ...(req.onProgress ? { onOutput: req.onProgress } : {}),
+      ...(req.idleTimeoutMs ? { idleTimeoutMs: req.idleTimeoutMs } : {}),
     });
     const model = req.model ?? this.cfg.model;
     const base = { exitCode: r.exitCode, durationMs: r.durationMs, notes: r.notes, ...(model ? { model } : {}) };

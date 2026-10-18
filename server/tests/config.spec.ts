@@ -91,3 +91,16 @@ describe("error patterns", () => {
     expect(p.QUOTA!.some((r) => r.test("You’ve hit your usage limit"))).toBe(true);
   });
 });
+
+describe("provider-reliability config", () => {
+  it("defaults: 30 min write limit, 120 s idle limit; transport and stream-json are accepted", async () => {
+    const { parseConfig } = await import("../src/config.js");
+    const c = parseConfig({});
+    expect(c.defaults.writeTimeoutMs).toBe(1_800_000);
+    expect(c.defaults.idleTimeoutMs).toBe(120_000);
+    const o = parseConfig({ providers: { codex: { transport: "exec" }, antigravity: { outputFormat: "stream-json", writeModeArgs: [] } } });
+    expect(o.providers.codex.transport).toBe("exec");
+    expect(o.providers.antigravity.outputFormat).toBe("stream-json");
+    expect(o.providers.antigravity.writeModeArgs).toEqual([]);
+  });
+});

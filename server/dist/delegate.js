@@ -18,12 +18,16 @@ export function outsideScope(changed, scope) {
         return !entries.some((e) => (e.endsWith("/") ? file.startsWith(e) : file === e));
     });
 }
+/** Failed writes whose worktree is kept when it has changes. */
+const KEEP_ON = ["CANCELLED", "TIMEOUT", "STALLED"];
+/** Of those, the ones that end the chain as `partial` (R5); CANCELLED ends it as `cancelled`. */
+const STOP_ON = ["TIMEOUT", "STALLED"];
 export async function delegate(params, ctx) {
     const started = Date.now();
     const id = `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomBytes(3).toString("hex")}`;
     const { config } = ctx;
     const mode = params.mode ?? config.defaults.mode;
-    const timeoutMs = params.timeoutMs ?? config.defaults.timeoutMs;
+    const timeoutMs = params.timeoutMs ?? (mode === "write" ? config.defaults.writeTimeoutMs : config.defaults.timeoutMs);
     const sessionKey = params.sessionId ?? ctx.instanceId;
     // The job's controller follows the MCP request's signal and delegation_cancel alike.
     const signal = ctx.jobs
@@ -69,6 +73,7 @@ export async function delegate(params, ctx) {
             });
         }
         await ensureShims();
+        let lastHadChanges = false;
         const execute = async (provider, adapter) => {
             let meta;
             if (isolate && repoRoot) {
@@ -93,6 +98,7 @@ export async function delegate(params, ctx) {
                     env: workerEnv(meta),
                     ...(signal ? { signal } : {}),
                     ...(ctx.jobs ? { onProgress: (chunk) => ctx.jobs?.progress(id, chunk) } : {}),
+                    idleTimeoutMs: config.defaults.idleTimeoutMs,
                 });
             }
             catch (err) {
@@ -125,8 +131,9 @@ export async function delegate(params, ctx) {
                         });
                     }
                 }
-                // A cancelled write keeps what the worker already did (E3), like a finished one.
-                const keep = result.ok || result.error?.type === "CANCELLED";
+                // A cancelled, timed-out or stalled write keeps what the worker already did (E3, R5), like a finished one.
+                const keep = result.ok || KEEP_ON.includes(result.error?.type ?? "NON_ZERO_EXIT");
+                lastHadChanges = mode === "write" && changes.files.length > 0;
                 if (mode === "write" && keep && changes.files.length > 0) {
                     kept = { meta, changes };
                 }
@@ -145,6 +152,7 @@ export async function delegate(params, ctx) {
             execute,
             ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
             ...(signal ? { signal } : {}),
+            shouldStop: (_provider, result) => lastHadChanges && STOP_ON.includes(result.error?.type ?? "NON_ZERO_EXIT"),
             onAttempt: async (provider, result) => {
                 await ctx.store.update((s) => {
                     recordCall(s, {
@@ -185,7 +193,7 @@ export async function delegate(params, ctx) {
             };
             if (routing)
                 response.routing = { rule: routing.rule, provider: routing.provider };
-            if (kept && (r.status === "success" || r.status === "cancelled")) {
+            if (kept && (r.status === "success" || r.status === "cancelled" || r.status === "partial")) {
                 response.diff = kept.changes.diff;
                 response.diffTruncated = kept.changes.truncated;
                 response.filesChanged = kept.changes.files;
@@ -244,6 +252,12 @@ export async function delegate(params, ctx) {
     }
 }
 function nextSteps(r) {
+    if (r.status === "partial") {
+        return [
+            `The worker ran out of time (${r.attempts.at(-1)?.errorType ?? "TIMEOUT"}) after changing files; nothing was retried. Its work is in ${r.worktreePath} (see \`diff\`, full patch in \`patchFile\`).`,
+            "Review it like any diff. Keep it: `delegation_apply` with the worktreePath and finish the rest yourself, or delegate the remainder. Drop it: `delegation_discard`.",
+        ];
+    }
     if (r.status === "cancelled") {
         return r.worktreePath
             ? [

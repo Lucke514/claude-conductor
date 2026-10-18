@@ -106,8 +106,8 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 
 ## T5 — Timeouts separados, diff parcial y campos de config
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C3 · **Implements**: R4, R5
 - **Files**: `server/src/config.ts`, `server/src/fallback.ts`, `server/src/delegate.ts`, `config/multiprovider.example.json`, `server/tests/config.spec.ts`, `server/tests/delegate.spec.ts`, `server/tests/fixtures/fake-codex.mjs`
 - **Do**:
@@ -126,12 +126,12 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
   - la config sin overrides da los nuevos defaults;
   - `transport: "exec"` y `writeModeArgs: []` se respetan.
 - **Verify**: `npm --prefix server test -- config delegate`
-- **Notes**: —
+- **Notes**: Hecha por Claude. `defaults.writeTimeoutMs` (30 min) y `defaults.idleTimeoutMs` (120 s); `providers.*.transport` (`app-server` | `exec`) y `outputFormat: "stream-json"` en el esquema. `ProviderRequest.idleTimeoutMs` llega a `runProcess`. `runChain` tiene `shouldStop`: un `TIMEOUT`/`STALLED` en write con cambios termina en `partial`, con 1 intento, sin breaker y sin reintento, y `delegate()` conserva el worktree con `diff` y `patchFile`. `sdd_task_delegate` trata `partial` como `cancelled` (Owner intacto, sin Verify). El default `--dangerously-skip-permissions` de agy en write se puso en el adapter (`DEFAULT_WRITE_ARGS`), porque el esquema es común a los dos proveedores. Los defaults de `transport` y `stream-json` se aplican en T7 y T6, cuando existan sus implementaciones, para no romper agy y codex entre tareas. `fake-codex` tiene el modo `stall`; el stall con cambios usa `hang-write`, por eso no se creó `write-then-stall`. Ejemplo de config actualizado. Tests: 2 en `delegate.spec.ts` y 1 en `config.spec.ts`. Gates: typecheck 0 errores, 258 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: none
 
 ## T6 [P] — agy con `stream-json` y detección de permisos
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C4 · **Implements**: R2, R3, E2, E6
 - **Files**: `server/src/providers/antigravity.ts`, `server/tests/adapters.spec.ts`, `server/tests/fixtures/fake-agy.mjs`, `server/tests/fixtures/agy-stream.jsonl`
 - **Do**:
@@ -153,7 +153,7 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 ## T7 [P] — Codex por `app-server`
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C5 · **Implements**: R1, E1
 - **Files**: `server/src/providers/codex-app-server.ts`, `server/src/providers/codex.ts`, `server/tests/codex-app-server.spec.ts`, `server/tests/fixtures/fake-codex-app-server.mjs`
 - **Do**:

@@ -283,6 +283,33 @@ describe("delegate cancellation", () => {
   });
 });
 
+describe("provider-reliability R4/R5: idle timeout and partial results", () => {
+  it("R5: a write that stalls after changing files ends as partial, with one attempt and its diff", async () => {
+    const repo = makeRepo();
+    process.env.FAKE_MODE = "hang-write";
+    const c = ctx(repo, { defaults: { idleTimeoutMs: 300 } });
+    const r = await delegate({ provider: "codex", task: "big job", mode: "write" }, c);
+    expect(r.status).toBe("partial");
+    expect(r.attempts).toEqual([expect.objectContaining({ provider: "codex", errorType: "STALLED" })]);
+    expect(r.diff).toContain("partial work");
+    expect(r.patchFile && existsSync(r.patchFile)).toBe(true);
+    expect(r.nextSteps[0]).toContain("ran out of time");
+    expect(git(repo, "branch", "--list", "mp/*").split("\n").filter(Boolean)).toHaveLength(1);
+    expect((await c.store.read()).providers.codex?.breaker?.consecutiveFailures ?? 0).toBe(0);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("R5: without changes, a timeout is retried per retryOn and nothing is kept", async () => {
+    const repo = makeRepo();
+    process.env.FAKE_MODE = "stall";
+    const c = ctx(repo, { retry: { maxRetries: 1, baseDelayMs: 1, maxDelayMs: 2 } });
+    const r = await delegate({ provider: "codex", task: "quiet", mode: "write", timeoutMs: 400, fallback: false }, c);
+    expect(r.status).toBe("failed");
+    expect(r.attempts.map((a) => a.errorType)).toEqual(["TIMEOUT", "TIMEOUT"]);
+    expect(git(repo, "branch", "--list", "mp/*")).toBe("");
+  });
+});
+
 import { gitConfigEnv } from "../src/worktree.js";
 describe("gitConfigEnv", () => {
   it("appends to existing GIT_CONFIG_* entries", () => {

@@ -1,14 +1,46 @@
 {
-  "chain": ["codex", "antigravity", "claude"],
+  "chain": [
+    "codex",
+    "antigravity",
+    "claude"
+  ],
   "routing": {
-    "review": { "provider": "codex", "keywords": ["review", "revisa", "revisar", "audit", "code review"] },
-    "refactor": { "provider": "antigravity", "keywords": ["refactor", "refactoriza", "rename", "extract"] },
-    "tests": { "provider": "codex", "keywords": ["test", "tests", "spec", "vitest", "jest"] },
+    "review": {
+      "provider": "codex",
+      "keywords": [
+        "review",
+        "revisa",
+        "revisar",
+        "audit",
+        "code review"
+      ]
+    },
+    "refactor": {
+      "provider": "antigravity",
+      "keywords": [
+        "refactor",
+        "refactoriza",
+        "rename",
+        "extract"
+      ]
+    },
+    "tests": {
+      "provider": "codex",
+      "keywords": [
+        "test",
+        "tests",
+        "spec",
+        "vitest",
+        "jest"
+      ]
+    },
     "docs": "antigravity"
   },
   "defaults": {
     "mode": "read",
     "timeoutMs": 600000,
+    "writeTimeoutMs": 1800000,
+    "idleTimeoutMs": 120000,
     "maxFileBytes": 65536,
     "maxTotalBytes": 524288,
     "maxDiffBytes": 204800
@@ -22,15 +54,23 @@
     "baseDelayMs": 2000,
     "maxDelayMs": 30000,
     "factor": 2,
-    "retryOn": ["RATE_LIMIT", "TIMEOUT"]
+    "retryOn": [
+      "RATE_LIMIT",
+      "TIMEOUT"
+    ]
   },
   "isolation": {
     "readMode": "worktree",
     "includeUncommitted": true,
-    "symlink": ["node_modules"]
+    "symlink": [
+      "node_modules"
+    ]
   },
   "verify": {
-    "commands": ["npm run lint", "npm test"],
+    "commands": [
+      "npm run lint",
+      "npm test"
+    ],
     "timeoutMs": 300000
   },
   "guardrails": {
@@ -47,14 +87,26 @@
     "codex": {
       "enabled": true,
       "binaryPath": "codex",
-      "extraArgs": ["--ephemeral"],
+      "extraArgs": [
+        "--ephemeral"
+      ],
       "usePty": false,
       "skipGitRepoCheck": true,
       "timeoutMs": 900000,
-      "authCheckArgs": ["login", "status"],
+      "authCheckArgs": [
+        "login",
+        "status"
+      ],
       "errorPatterns": {
-        "RATE_LIMIT": ["rate.?limit", "\\b429\\b", "too many requests", "at capacity", "high demand"]
-      }
+        "RATE_LIMIT": [
+          "rate.?limit",
+          "\\b429\\b",
+          "too many requests",
+          "at capacity",
+          "high demand"
+        ]
+      },
+      "transport": "app-server"
     },
     "antigravity": {
       "enabled": true,
@@ -64,11 +116,21 @@
       "outputFormat": "text",
       "modelFlag": "--model",
       "readModeArgs": [],
-      "writeModeArgs": ["--dangerously-skip-permissions"],
-      "versionArgs": ["--version"],
+      "writeModeArgs": [
+        "--dangerously-skip-permissions"
+      ],
+      "versionArgs": [
+        "--version"
+      ],
       "authCheckArgs": [],
       "errorPatterns": {
-        "AUTH": ["authentication required", "failed to retrieve token", "keyring is locked", "unauthenticated", "\\b401\\b"]
+        "AUTH": [
+          "authentication required",
+          "failed to retrieve token",
+          "keyring is locked",
+          "unauthenticated",
+          "\\b401\\b"
+        ]
       }
     }
   }

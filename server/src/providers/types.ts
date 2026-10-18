@@ -43,6 +43,8 @@ export interface ProviderRequest {
   signal?: AbortSignal;
   /** The worker's output as it arrives (progress, idle detection). */
   onProgress?: (chunk: string) => void;
+  /** Kill the worker after this long without output (STALLED). */
+  idleTimeoutMs?: number;
 }
 
 export interface TokenUsage {
