@@ -202,6 +202,8 @@ export interface VerificationReport {
   pass: number;
   /** null when the report has no readable Converged anchor. */
   converged: boolean | null;
+  /** What follows "Converged: no —": what convergence is waiting on. */
+  pending?: string;
   verdicts: Record<string, number>;
 }
 
@@ -217,7 +219,7 @@ export function parseVerificationReports(md: string): VerificationReport[] {
     if (!heading) continue;
     const block: string[] = [];
     while (i + 1 < lines.length && !/^#{1,3} /.test(lines[i + 1]!)) block.push(lines[++i]!);
-    const converged = /^Converged:[ \t]*(yes|no)\b/m.exec(block.join("\n"));
+    const converged = /^Converged:[ \t]*(yes|no)\b(?:[ \t]*—[ \t]*(.+))?/m.exec(block.join("\n"));
     const counts = new Map<string, number>();
     const table = block.findIndex((line) => line.trim().startsWith("|") && cells(line).includes("Verdict"));
     if (table >= 0) {
@@ -229,7 +231,9 @@ export function parseVerificationReports(md: string): VerificationReport[] {
     }
     // fromEntries defines own properties, so a verdict named "__proto__" stays a plain key.
     const verdicts: Record<string, number> = Object.fromEntries(counts);
-    reports.push({ pass: Number(heading[1]), converged: converged ? converged[1] === "yes" : null, verdicts });
+    const report: VerificationReport = { pass: Number(heading[1]), converged: converged ? converged[1] === "yes" : null, verdicts };
+    if (converged?.[1] === "no" && converged[2]) report.pending = converged[2].trim();
+    reports.push(report);
   }
   return reports;
 }

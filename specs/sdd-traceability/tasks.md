@@ -34,8 +34,8 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 
 ## T2 — Pipeline de etapas
 
-- [ ] Done
-- **Owner**: codex (multi-provider) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C1 · **Implements**: R1, R2, R3, R4, R8, E1, E2, E5, E6, E7, E8, E10, E11
 - **Files**: `server/src/sdd/pipeline.ts`, `server/tests/sdd-pipeline.spec.ts`, `server/tests/sdd-fixtures.ts`
 - **Do**: Implementar `featureStatus(projectDir, slug, recent?)` y `listFeatureStatus(projectDir, recent?)` según C1:
@@ -56,7 +56,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
   - un slug inexistente lista los disponibles;
   - `specs/` tiene el mismo hash antes y después, y dos llamadas devuelven el mismo JSON.
 - **Verify**: `npm --prefix server test -- sdd-pipeline`
-- **Notes**: —
+- **Notes**: Delegada a codex (delegación 20261018050508-a861e9). `server/src/sdd/pipeline.ts` (`featureStatus`, `listFeatureStatus`) y `server/tests/sdd-pipeline.spec.ts` (17 casos). Al integrar: `VerificationReport.pending` (el texto tras `Converged: no —`) pasa al `nextStep` para que nombre lo que falta (SC1). Contra este repo: `sdd-guardrails` Cerrada, `sdd-task-delegation` `Verificación · pass 1 no convergido` con la decisión R10/SC1 en el siguiente paso. Gates: typecheck 0 errores, 228 passed (211 + 17), plugin validate ok, plugin test 9 pass. El gate automático marcó `statusline.spec.ts` por `NO_COLOR` en el entorno (G2), no por T2. Clean-code: none · close calls: `PipelineDelegation` amplía `RecentDelegation` con `sdd` mientras T3 no esté integrada — se simplifica al integrar T3
 
 ## T3 [P] — `slug` y `taskId` en audit y state
 
@@ -151,6 +151,10 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 ---
 
 ## Gaps found in verification
+
+- **G1** — `orphan_claim` marca como huérfana una tarea cuya delegación sigue en curso, porque `state.json` solo registra una delegación al terminar (visto con T3 corriendo). Se corrige en T5: la herramienta considera también los worktrees `mp/*` vivos de esa tarea.
+- **G2** — `server/tests/statusline.spec.ts` ("shows not installed / no auth in red") falla cuando el entorno tiene `NO_COLOR`, porque `statusline/index.js` decide el color al cargar el módulo. Hace que el gate Tests de cada delegación salga "NEW FAILURE". Fuera del alcance de esta feature: el test debe fijar `NO_COLOR` antes de importar.
+- **G3** — El brief de `sdd_task_delegate` muestra `Do: —` cuando el `**Do**` de la tarea es una lista con viñetas en las líneas siguientes (visto con T3): `parseTasks` en `server/src/sdd/artifacts.ts` solo lee el texto de la misma línea. Fuera del alcance de esta feature (`sdd-task-delegation`).
 
 ---
 

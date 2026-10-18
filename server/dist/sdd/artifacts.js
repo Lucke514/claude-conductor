@@ -150,7 +150,7 @@ export function parseVerificationReports(md) {
         const block = [];
         while (i + 1 < lines.length && !/^#{1,3} /.test(lines[i + 1]))
             block.push(lines[++i]);
-        const converged = /^Converged:[ \t]*(yes|no)\b/m.exec(block.join("\n"));
+        const converged = /^Converged:[ \t]*(yes|no)\b(?:[ \t]*—[ \t]*(.+))?/m.exec(block.join("\n"));
         const counts = new Map();
         const table = block.findIndex((line) => line.trim().startsWith("|") && cells(line).includes("Verdict"));
         if (table >= 0) {
@@ -163,7 +163,10 @@ export function parseVerificationReports(md) {
         }
         // fromEntries defines own properties, so a verdict named "__proto__" stays a plain key.
         const verdicts = Object.fromEntries(counts);
-        reports.push({ pass: Number(heading[1]), converged: converged ? converged[1] === "yes" : null, verdicts });
+        const report = { pass: Number(heading[1]), converged: converged ? converged[1] === "yes" : null, verdicts };
+        if (converged?.[1] === "no" && converged[2])
+            report.pending = converged[2].trim();
+        reports.push(report);
     }
     return reports;
 }

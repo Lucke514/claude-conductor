@@ -135,7 +135,7 @@ describe("traceability artifact readers", () => {
 
   it("A3: parses the real delegation report snapshot including verdict counts", () => {
     expect(parseVerificationReports(DELEGATION_REPORT.replace(/\n/g, "\r\n"))).toEqual([
-      { pass: 1, converged: false, verdicts: { met: 19, "partially met": 1 } },
+      { pass: 1, converged: false, verdicts: { met: 19, "partially met": 1 }, pending: expect.stringMatching(/^awaiting the user's decision on R10\/SC1/) },
     ]);
   });
 
