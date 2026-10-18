@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
 import { parseAcceptance, sddTaskClaim, sddTaskDelegate, sddTaskRelease } from "../src/sdd/task-delegation.js";
 import { removeWorktree, readMeta } from "../src/worktree.js";
@@ -76,6 +77,32 @@ describe("sdd_task_* tools", () => {
     expect(after).not.toContain("- [x] Done\n- **Owner**: codex");
     expect(after.match(/- \*\*Notes\*\*: —/g)).toHaveLength(TASKS.match(/- \*\*Notes\*\*: —/g)!.length);
     expect(r.nextSteps[1]).toContain("delegation_apply");
+
+    const state = await s.ctx.store.read();
+    expect(state.recent?.[0]?.sdd).toEqual({ slug: "demo", taskId: "T3" });
+    const log = readdirSync(logsDir()).map((f) => readFileSync(path.join(logsDir(), f), "utf8")).join("");
+    const lines = log.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const lastLine = lines[lines.length - 1];
+    expect(lastLine?.id).toBe(r.id);
+    expect(lastLine?.sdd).toEqual({ slug: "demo", taskId: "T3" });
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("R5: sdd_task_delegate records sdd: { slug, taskId } in the audit log and state.recent[0]", async () => {
+    const s = setup();
+    await claimAndCommit(s);
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, s.ctx);
+    const state = await s.ctx.store.read();
+    expect(state.recent?.[0]?.sdd).toEqual({ slug: "demo", taskId: "T3" });
+
+    const log = readdirSync(logsDir()).map((f) => readFileSync(path.join(logsDir(), f), "utf8")).join("");
+    const lines = log.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const lastLine = lines[lines.length - 1];
+    expect(lastLine?.id).toBe(r.id);
+    expect(lastLine?.sdd).toEqual({ slug: "demo", taskId: "T3" });
     await removeWorktree(await readMeta(r.worktreePath!));
   });
 

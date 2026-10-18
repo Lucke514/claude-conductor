@@ -69,6 +69,9 @@ export interface RecentDelegation {
   task: string;
   filesChanged?: number;
   durationMs: number;
+  sdd?: { slug: string; taskId: string };
+  /** Guardrail violations of this delegation, for the SDD pipeline's warnings. */
+  violations?: { type: string; detail: string }[];
 }
 
 export interface MpState {

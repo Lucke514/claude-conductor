@@ -5,11 +5,7 @@ import type { RecentDelegation } from "../state.js";
 import { parseScope, parseStatus, parseTasks, parseVerificationReports, readFeatureArtifacts, SddError } from "./artifacts.js";
 import type { ScopeRow, VerificationReport } from "./artifacts.js";
 
-/** Structural extension also accepts the traceability fields before C2 lands. */
-export type PipelineDelegation = Partial<RecentDelegation> & {
-  sdd?: { slug: string; taskId: string };
-  violations?: { type: string; detail: string }[];
-};
+export type PipelineDelegation = Partial<RecentDelegation>;
 export type Stage = "Spec" | "Plan" | "Tasks" | "Implementación" | "Verificación" | "Cerrada" | "Descartada" | "Desconocida";
 export interface FeatureStatus {
   slug: string;

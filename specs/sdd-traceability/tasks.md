@@ -60,8 +60,8 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 
 ## T3 [P] — `slug` y `taskId` en audit y state
 
-- [ ] Done
-- **Owner**: antigravity (multi-provider) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C2 · **Implements**: R5, E7
 - **Files**: `server/src/audit.ts`, `server/src/state.ts`, `server/src/delegate.ts`, `server/src/sdd/task-delegation.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/delegate.spec.ts`
 - **Do**:
@@ -70,7 +70,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
   - El esquema zod de la herramienta pública `delegate` en `index.ts` no se toca.
 - **Acceptance**: Tras un `sdd_task_delegate` con el CLI falso, la última línea del JSONL de audit y `recent[0]` de `state.json` llevan `sdd: { slug, taskId }`; un `delegate` normal no lleva `sdd`; `delegate.spec.ts` y `sdd-task-delegation.spec.ts` existentes siguen pasando.
 - **Verify**: `npm --prefix server test -- sdd-task-delegation delegate`
-- **Notes**: —
+- **Notes**: Delegada a antigravity (delegación 20261018045859-13e576). El intento agotó el timeout de 10 min con el trabajo hecho y el reintento empezó de cero. Se integró el patch guardado del primer intento (`~/.claude/multi-provider/patches/20261018045859-13e576-antigravity.patch`, sin `server/dist`) y se detuvieron a mano el reintento y el fallback a codex. Archivos: `sdd?` en `AuditEntry`, `RecentDelegation` y `DelegateParams` (`delegate()` lo copia a audit y recent; `sdd_task_delegate` lo rellena), y tests en `delegate.spec.ts` y `sdd-task-delegation.spec.ts`. Al integrar: `RecentDelegation.violations` también se guarda en `state.json`, porque sin eso el aviso `violations` de T2 nunca se disparaba, y `PipelineDelegation` queda como `Partial<RecentDelegation>`. Gates: typecheck 0 errores, 230 passed, plugin validate ok, plugin test 9 pass. Clean-code: none · close calls: none
 
 ## T4 [P] — Usage de Claude Code en la card
 

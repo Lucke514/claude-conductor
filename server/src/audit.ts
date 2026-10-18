@@ -24,6 +24,7 @@ export interface AuditEntry {
   filesChanged?: number;
   violations?: { type: string; detail: string }[];
   sessionKey: string;
+  sdd?: { slug: string; taskId: string };
 }
 
 export async function appendAudit(entry: AuditEntry, dir = logsDir()): Promise<void> {

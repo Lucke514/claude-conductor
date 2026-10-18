@@ -191,6 +191,8 @@ export async function delegate(params, ctx) {
             task: taskLabel(params.task),
             durationMs: response.durationMs,
             ...(response.filesChanged ? { filesChanged: response.filesChanged.length } : {}),
+            ...(params.sdd ? { sdd: { slug: params.sdd.slug, taskId: params.sdd.taskId } } : {}),
+            ...(violations.length ? { violations: violations.map((v) => ({ type: v.type, detail: v.detail })) } : {}),
         }))
             .catch(() => undefined);
         await appendAudit({
@@ -216,6 +218,7 @@ export async function delegate(params, ctx) {
             ...(response.filesChanged ? { filesChanged: response.filesChanged.length } : {}),
             ...(violations.length ? { violations: violations.map((v) => ({ type: v.type, detail: v.detail })) } : {}),
             sessionKey,
+            ...(params.sdd ? { sdd: { slug: params.sdd.slug, taskId: params.sdd.taskId } } : {}),
         }).catch(() => undefined);
         return response;
     }
