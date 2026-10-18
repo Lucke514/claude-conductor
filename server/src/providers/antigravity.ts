@@ -55,6 +55,92 @@ export function parseAgyJson(output: string): AgyJson | undefined {
   return undefined;
 }
 
+export interface AgyStream {
+  response: string;
+  status?: string;
+  usage?: TokenUsage;
+  /** A step that waited for the user's approval (headless runs cannot give it). */
+  permission?: { tool: string; command?: string };
+  events: number;
+}
+
+interface AgyEvent {
+  event?: string;
+  step_update?: {
+    state?: string;
+    step_type?: string;
+    tool_name?: string;
+    text_delta?: string;
+    requires_approval?: boolean;
+    tool_info?: { name?: string; parameters?: Record<string, unknown> };
+  };
+  result?: { status?: string; response?: string; usage?: unknown };
+}
+
+const PERMISSION_TOOLS = ["ask_permission", "ask_custom_permission"];
+const WAITING_STATE = /wait|pending|approv|review|permission/i;
+
+function parseEvent(line: string): AgyEvent | undefined {
+  const t = line.trim();
+  if (!t.startsWith("{")) return undefined;
+  try {
+    const v: unknown = JSON.parse(t);
+    return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as AgyEvent) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A permission request in one event, as the stream shows it. */
+export function permissionRequest(ev: AgyEvent): AgyStream["permission"] | undefined {
+  const st = ev.step_update;
+  if (!st) return undefined;
+  const tool = st.tool_name ?? st.tool_info?.name ?? "";
+  const waiting = st.requires_approval === true || (st.step_type === "tool" && !!st.state && WAITING_STATE.test(st.state));
+  if (!waiting && !PERMISSION_TOOLS.includes(tool)) return undefined;
+  const params = st.tool_info?.parameters ?? {};
+  const command = [params.CommandLine, params.command, params.Command].find((v): v is string => typeof v === "string");
+  return { tool: tool || "unknown", ...(command ? { command } : {}) };
+}
+
+/** One human line for delegation_status from an event, or undefined for text deltas and noise. */
+export function progressFromEvent(ev: AgyEvent): string | undefined {
+  const st = ev.step_update;
+  if (ev.event === "result") return `result ${ev.result?.status ?? ""}`.trim();
+  if (!st) return undefined;
+  if (st.step_type === "tool") {
+    const params = st.tool_info?.parameters ?? {};
+    const arg = [params.CommandLine, params.AbsolutePath, params.TargetFile, params.Query].find((v): v is string => typeof v === "string");
+    return `${(st.state ?? "").toLowerCase()} ${st.tool_name ?? st.tool_info?.name ?? "tool"}${arg ? `: ${arg}` : ""}`.trim();
+  }
+  if (st.step_type === "agent_response" && st.state === "DONE") return "agent response done";
+  return undefined;
+}
+
+/** agy --output-format stream-json: NDJSON events (init, step_update, result). */
+export function parseAgyStream(output: string): AgyStream {
+  const out: AgyStream = { response: "", events: 0 };
+  let deltas = "";
+  for (const line of output.split(/\r?\n/)) {
+    const ev = parseEvent(line);
+    if (!ev) continue;
+    out.events++;
+    out.permission ??= permissionRequest(ev);
+    const st = ev.step_update;
+    if (st?.step_type === "agent_response" && typeof st.text_delta === "string") deltas += st.text_delta;
+    if (ev.event === "result" && ev.result) {
+      if (typeof ev.result.status === "string") out.status = ev.result.status;
+      if (typeof ev.result.response === "string") out.response = ev.result.response;
+      const usage = extractUsage(ev.result.usage);
+      if (usage) out.usage = usage;
+    }
+  }
+  if (!out.response) out.response = deltas;
+  return out;
+}
+
+const UNKNOWN_FLAG = /unknown (flag|option)|unrecognized (flag|option|argument)|invalid (flag|option)/i;
+
 function extractUsage(u: unknown): TokenUsage | undefined {
   if (typeof u !== "object" || u === null) return undefined;
   let input = 0;
@@ -65,7 +151,8 @@ function extractUsage(u: unknown): TokenUsage | undefined {
     const key = k.toLowerCase();
     if (/cache/.test(key)) cached += v;
     else if (/input|prompt/.test(key)) input += v;
-    else if (/output|candidates|completion/.test(key)) output += v;
+    else if (/total/.test(key)) continue;
+    else if (/output|candidates|completion|thinking/.test(key)) output += v;
   }
   return input || output ? { inputTokens: input, cachedInputTokens: cached, outputTokens: output } : undefined;
 }
@@ -83,11 +170,16 @@ export class AntigravityAdapter implements ProviderAdapter {
     return this.cfg.enabled && findInPath(this.bin) !== undefined;
   }
 
-  buildArgs(req: ProviderRequest, prompt: string): string[] {
+  /** "stream-json" by default: events give progress, stall detection and permission requests. */
+  get format(): "text" | "json" | "stream-json" {
+    return this.cfg.outputFormat ?? "stream-json";
+  }
+
+  buildArgs(req: ProviderRequest, prompt: string, format = this.format): string[] {
     const args: string[] = [];
     const model = req.model ?? this.cfg.model;
     if (model) args.push(this.cfg.modelFlag ?? "--model", model);
-    if (this.cfg.outputFormat === "json") args.push("--output-format", "json");
+    if (format !== "text") args.push("--output-format", format);
     // Headless write mode cannot answer permission prompts: skip them inside the isolated worktree (R2).
     args.push(...((req.mode === "write" ? (this.cfg.writeModeArgs ?? DEFAULT_WRITE_ARGS) : this.cfg.readModeArgs) ?? []));
     args.push(...this.cfg.extraArgs);
@@ -109,50 +201,124 @@ export class AntigravityAdapter implements ProviderAdapter {
     }
     const notes: string[] = [];
     try {
-      const r = await runProcess({
-        command: this.bin,
-        args: this.buildArgs(req, prompt),
-        cwd: req.cwd,
-        timeoutMs: req.timeoutMs,
-        env: { NO_COLOR: "1", ...req.env },
-        usePty: this.cfg.usePty ?? true,
-        ...(req.signal ? { signal: req.signal } : {}),
-        ...(req.onProgress ? { onOutput: req.onProgress } : {}),
-        ...(req.idleTimeoutMs ? { idleTimeoutMs: req.idleTimeoutMs } : {}),
-      });
-      notes.push(...r.notes);
-      const model = req.model ?? this.cfg.model;
-      const base = { exitCode: r.exitCode, durationMs: r.durationMs, notes, ...(model ? { model } : {}) };
-      if (r.cancelled) return { ...base, ok: false, output: r.stdout.trim(), error: { type: "CANCELLED", message: "delegation cancelled" } };
-      // Under a PTY stderr is merged into stdout.
-      const combined = [r.stdout, r.stderr].filter(Boolean).join("\n");
-
-      let output = r.stdout.trim();
-      let usage: TokenUsage | undefined;
-      if (this.cfg.outputFormat === "json" && r.exitCode === 0 && !r.timedOut) {
-        const env = parseAgyJson(r.stdout);
-        if (!env) {
-          return { ...base, ok: false, output: "", error: { type: "PARSE_ERROR", message: `no JSON envelope in output: ${excerpt(r.stdout, 200)}` } };
-        }
-        if (env.status && /^running$/i.test(env.status)) {
-          return { ...base, ok: false, output: env.response, error: { type: "TIMEOUT", message: "agy reported status RUNNING (print timeout)" } };
-        }
-        if (env.status && /error|fail/i.test(env.status)) {
-          const failure = classifyFailure({ exitCode: 1, timedOut: false }, combined, patterns);
-          return { ...base, ok: false, output: env.response, error: failure ?? { type: "NON_ZERO_EXIT", message: `status ${env.status}` } };
-        }
-        output = env.response.trim();
-        usage = env.usage;
+      const first = await this.attempt(req, prompt, this.format, notes);
+      // E2: an agy without --output-format stream-json gets one more try in text mode.
+      if (first.retryAsText) {
+        notes.push("this agy does not accept --output-format stream-json; ran in text mode (no progress or stall events)");
+        return (await this.attempt(req, prompt, "text", notes)).result;
       }
-
-      const clean = r.exitCode === 0 && !r.timedOut && output !== "" && !looksLikeOnlyError(output, patterns);
-      const failure = clean ? undefined : classifyFailure(r, combined, patterns);
-      if (failure) return { ...base, ok: false, output, error: failure };
-      if (!output) return { ...base, ok: false, output: "", error: { type: "EMPTY_OUTPUT", message: "agy produced no output" } };
-      return { ...base, ok: true, output, ...(usage ? { usage } : {}) };
+      return first.result;
     } finally {
       if (promptFile) await fs.rm(promptFile, { force: true }).catch(() => undefined);
     }
+  }
+
+  private async attempt(
+    req: ProviderRequest,
+    prompt: string,
+    format: "text" | "json" | "stream-json",
+    notes: string[],
+  ): Promise<{ result: ProviderResult; retryAsText?: boolean }> {
+    const patterns = effectiveErrorPatterns("antigravity", this.cfg);
+    const stream = format === "stream-json";
+    // A permission request ends the attempt at once instead of waiting for the idle or total limit (R3).
+    const own = new AbortController();
+    const onAbort = () => own.abort();
+    if (req.signal?.aborted) own.abort();
+    else req.signal?.addEventListener("abort", onAbort, { once: true });
+    let permission: AgyStream["permission"];
+    let pending = "";
+    const onOutput = (chunk: string) => {
+      if (!stream) {
+        req.onProgress?.(chunk);
+        return;
+      }
+      const lines = (pending + chunk).split(/\r?\n/);
+      pending = lines.pop() ?? "";
+      for (const line of lines) {
+        const ev = parseEvent(line);
+        if (!ev) continue;
+        const progress = progressFromEvent(ev);
+        if (progress) req.onProgress?.(`${progress}\n`);
+        if (!permission && (permission = permissionRequest(ev))) own.abort();
+      }
+    };
+    let r: Awaited<ReturnType<typeof runProcess>>;
+    try {
+      r = await runProcess({
+        command: this.bin,
+        args: this.buildArgs(req, prompt, format),
+        cwd: req.cwd,
+        timeoutMs: req.timeoutMs,
+        env: { NO_COLOR: "1", ...req.env },
+        // A PTY makes agy interactive (it may wait on prompts); stream-json needs none.
+        usePty: this.cfg.usePty ?? !stream,
+        signal: own.signal,
+        onOutput,
+        ...(req.idleTimeoutMs ? { idleTimeoutMs: req.idleTimeoutMs } : {}),
+      });
+    } finally {
+      req.signal?.removeEventListener("abort", onAbort);
+    }
+    notes.push(...r.notes);
+    const model = req.model ?? this.cfg.model;
+    const base = { exitCode: r.exitCode, durationMs: r.durationMs, notes, ...(model ? { model } : {}) };
+    const done = (result: ProviderResult) => ({ result });
+    if (permission) {
+      const what = permission.command ? `${permission.tool}: ${permission.command}` : permission.tool;
+      return done({
+        ...base,
+        ok: false,
+        output: "",
+        error: {
+          type: "PERMISSION_BLOCKED",
+          message: `agy waited for approval of ${what}. fix: set providers.antigravity.writeModeArgs (default ["--dangerously-skip-permissions"]) or readModeArgs`,
+        },
+      });
+    }
+    if (r.cancelled) return done({ ...base, ok: false, output: r.stdout.trim(), error: { type: "CANCELLED", message: "delegation cancelled" } });
+    // Under a PTY stderr is merged into stdout.
+    const combined = [r.stdout, r.stderr].filter(Boolean).join("\n");
+    if (stream && r.exitCode !== 0 && !r.timedOut && !r.stalled && UNKNOWN_FLAG.test(combined)) return { result: { ...base, ok: false, output: "" }, retryAsText: true };
+
+    let output = r.stdout.trim();
+    let usage: TokenUsage | undefined;
+    if (stream && r.exitCode === 0 && !r.timedOut && !r.stalled) {
+      const parsed = parseAgyStream(r.stdout);
+      if (parsed.events === 0 && r.stdout.trim()) {
+        return done({ ...base, ok: false, output: "", error: { type: "PARSE_ERROR", message: `no stream-json events in output: ${excerpt(r.stdout, 200)}` } });
+      }
+      if (parsed.status && /^running$/i.test(parsed.status)) {
+        return done({ ...base, ok: false, output: parsed.response, error: { type: "TIMEOUT", message: "agy reported status RUNNING (print timeout)" } });
+      }
+      if (parsed.status && /error|fail/i.test(parsed.status)) {
+        const failure = classifyFailure({ exitCode: 1, timedOut: false }, combined, patterns);
+        return done({ ...base, ok: false, output: parsed.response, error: failure ?? { type: "NON_ZERO_EXIT", message: `status ${parsed.status}` } });
+      }
+      output = parsed.response.trim();
+      usage = parsed.usage;
+    }
+    if (format === "json" && r.exitCode === 0 && !r.timedOut) {
+      const env = parseAgyJson(r.stdout);
+      if (!env) {
+        return done({ ...base, ok: false, output: "", error: { type: "PARSE_ERROR", message: `no JSON envelope in output: ${excerpt(r.stdout, 200)}` } });
+      }
+      if (env.status && /^running$/i.test(env.status)) {
+        return done({ ...base, ok: false, output: env.response, error: { type: "TIMEOUT", message: "agy reported status RUNNING (print timeout)" } });
+      }
+      if (env.status && /error|fail/i.test(env.status)) {
+        const failure = classifyFailure({ exitCode: 1, timedOut: false }, combined, patterns);
+        return done({ ...base, ok: false, output: env.response, error: failure ?? { type: "NON_ZERO_EXIT", message: `status ${env.status}` } });
+      }
+      output = env.response.trim();
+      usage = env.usage;
+    }
+
+    const clean = r.exitCode === 0 && !r.timedOut && !r.stalled && output !== "" && !looksLikeOnlyError(output, patterns);
+    const failure = clean ? undefined : classifyFailure(r, combined, patterns);
+    if (failure) return done({ ...base, ok: false, output, error: failure });
+    if (!output) return done({ ...base, ok: false, output: "", error: { type: "EMPTY_OUTPUT", message: "agy produced no output" } });
+    return done({ ...base, ok: true, output, ...(usage ? { usage } : {}) });
   }
 
   async healthCheck(): Promise<HealthReport> {

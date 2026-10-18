@@ -130,8 +130,8 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 
 ## T6 [P] — agy con `stream-json` y detección de permisos
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C4 · **Implements**: R2, R3, E2, E6
 - **Files**: `server/src/providers/antigravity.ts`, `server/tests/adapters.spec.ts`, `server/tests/fixtures/fake-agy.mjs`, `server/tests/fixtures/agy-stream.jsonl`
 - **Do**:
@@ -148,7 +148,7 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
   - `unknown-flag` cae a `text` con nota;
   - los tests existentes de agy siguen pasando.
 - **Verify**: `npm --prefix server test -- adapters`
-- **Notes**: —
+- **Notes**: Hecha por Claude. Formato capturado con agy 1.4.2 en la máquina del usuario: NDJSON con `init` (trae `permission_mode: "request-review"`), `step_update` (`step_type` user_input/agent_response/tool, `state` ACTIVE/DONE, `text_delta`, `tool_info.parameters.CommandLine`, `usage`) y `result` (`status`, `response`, `usage` con `thinking_tokens` y `cache_read_tokens`); fixture recortado en `tests/fixtures/agy-stream.jsonl`. Hallazgo: en print mode y sin PTY, agy ejecutó `ls` y `rm a.txt && touch b.txt` sin pedir permiso. El cuelgue de 10 min de `sdd-traceability` T3 se atribuye al PTY, que lo vuelve interactivo, por eso con `stream-json` el default es `usePty: false`. `outputFormat` por defecto es `stream-json`. `parseAgyStream`, `progressFromEvent` (líneas como `active run_command: npm test` para `delegation_status`) y `permissionRequest`: el evento de permiso **no se observó en vivo** y se infiere (estado WAITING/PENDING/approval, `requires_approval` o las herramientas `ask_permission`/`ask_custom_permission`); al detectarlo se aborta al momento con `PERMISSION_BLOCKED` y un fix. La red de seguridad es `STALLED` (T5). Flag desconocido → reintento en `text` con nota (E2). Thinking tokens cuentan como salida. Tests: 4 nuevos en `adapters.spec.ts` y 2 ajustados (args con el default nuevo; PTY explícito en `text`). Gates: typecheck 0 errores, 262 passed, plugin validate ok. Clean-code: `run()` se partió en `run` + `attempt` para el reintento en texto · close calls: `parseAgyJson` (formato `json`) se mantiene, sigue siendo un `outputFormat` válido
 
 ## T7 [P] — Codex por `app-server`
 

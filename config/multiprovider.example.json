@@ -112,8 +112,8 @@
       "enabled": true,
       "binaryPath": "agy",
       "extraArgs": [],
-      "usePty": true,
-      "outputFormat": "text",
+      "usePty": false,
+      "outputFormat": "stream-json",
       "modelFlag": "--model",
       "readModeArgs": [],
       "writeModeArgs": [
