@@ -68,7 +68,7 @@ Hoy el estado de una feature solo se conoce leyendo sus archivos: en este mismo 
 - **R8** — Calcular el estado nunca escribe en `specs/` ni cambia ningún `Status`, casilla u `Owner`. Dos llamadas seguidas sin cambios en los artefactos devuelven el mismo resultado.
 
 - **R9** — La cabecera de sesión de la conductor card, junto a modelo, ctx y costo, muestra cada ventana de rate limit que reporta `$.session.usage().rateLimits` (`five_hour` como `5h`, `seven_day` como `7d`, `spend_limit` como `gasto`): porcentaje usado con barra y tiempo hasta el reinicio (`resetsAt`). Se actualiza con `session.measure`, sin sondear la API.
-  - Given `rateLimits` = `[{ kind: "five_hour", percentUsed: 42, resetsAt: <en 2 h 10 m> }, { kind: "seven_day", percentUsed: 18.5, ... }]`, when se dibuja la card, then se lee `5h ▮▮▮▮▯▯ 42% · 2h10m` y `7d ▮▯▯▯▯▯ 18.5%`.
+  - Given `rateLimits` = `[{ kind: "five_hour", percentUsed: 42, resetsAt: <en 2 h 10 m> }, { kind: "seven_day", percentUsed: 18.5, ... }]`, when se dibuja la card, then se lee `5h ▮▮▮▯▯▯ 42% · 2h10m` y `7d ▮▯▯▯▯▯ 18.5%`.
   - Con 80 % o más, la ventana se dibuja en tono `warn`; con 95 % o más, en `error`. El porcentaje va siempre en texto.
 
 **Minimum shippable**: R1, R2, R3, R4, R6, R8, R9, E1, E2, E3, E12.
@@ -107,6 +107,7 @@ Hoy el estado de una feature solo se conoce leyendo sus archivos: en este mismo 
 - 2026-10-18 Spec aprobado por el usuario.
 - 2026-10-18 Plan aprobado por el usuario; Q2 se realiza con la card llamando a `sdd_feature_status` vía `$.mcp.call` (una sola implementación), porque el sandbox de mods no puede importar código del servidor.
 - 2026-10-18 Tasks aprobadas por el usuario.
+- 2026-10-18 R9: el ejemplo pasa de `▮▮▮▮▯▯` a `▮▮▮▯▯▯` para el 42 % — el original estaba mal calculado; la barra es el `bar()` de la card (6 × 0,42 = 2,5 → 3).
 
 ## Open questions
 

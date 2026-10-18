@@ -74,8 +74,8 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 
 ## T4 [P] — Usage de Claude Code en la card
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C5 · **Implements**: R9, E12, E13, E14
 - **Files**: `hooks/conductor/model.ts`, `hooks/conductor/card.tsx`, `types/index.d.ts`, `server/tests/card-model.spec.ts`, `tests/conductor-card.test.tsx`
 - **Do**:
@@ -85,14 +85,14 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
     - un `on('session.measure')` refresca `meta`;
     - la cabecera dibuja las ventanas en la línea de modelo/ctx/costo en `side` y en una línea propia en `below` (E14).
 - **Acceptance**:
-  - el ejemplo de R9 da `5h ▮▮▮▮▯▯ 42% · 2h10m` y `7d ▮▯▯▯▯▯ 18.5%`;
+  - el ejemplo de R9 da `5h ▮▮▮▯▯▯ 42% · 2h10m` y `7d ▮▯▯▯▯▯ 18.5%`;
   - 80 → `warn` y 95 → `error`;
   - `[]` → `usage —`;
   - sin `resetsAt` se muestra sin tiempo de reinicio, y `112` se muestra tal cual con la barra llena (E13);
   - el test de la card muestra las ventanas en `side` y en `below`;
   - los tests existentes de la card siguen pasando.
 - **Verify**: `npm --prefix server test -- card-model` · `claude plugin test .`
-- **Notes**: —
+- **Notes**: Hecha por Claude en la sesión principal. En `hooks/conductor/model.ts`, `rateLimitView`/`rateLimitText`. En `card.tsx`: `loadMeta` guarda `rateLimits`, un `on('session.measure')` refresca ctx/costo/ventanas, y la cabecera las dibuja en la línea de modelo/ctx/costo cuando la card es ancha (≥ 100 columnas) y en una línea propia debajo cuando es angosta, que es el caso del panel lateral y de la banda angosta. `SessionMeta.rateLimits` está en `types/index.d.ts`. Tests: 4 casos en `card-model.spec.ts` y 2 en `conductor-card.test.tsx`. Gates: typecheck 0 errores, 211 passed (207 + 4), plugin validate ok, plugin test 9 pass (7 + 2). Clean-code: none · close calls: el criterio ancho/angosto usa el `wide` que ya tenía la cabecera en lugar de mirar el placement — se queda, el panel lateral (46 columnas) no cabe en una sola línea. El test de la card comprueba el texto en los tres sitios, pero no la estructura de línea propia, porque `ui.find` no ve keys de `Text` anidados
 
 ## T5 — Herramienta `sdd_feature_status` y `/sdd-status`
 

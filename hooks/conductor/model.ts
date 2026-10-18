@@ -442,6 +442,43 @@ export function ctxBar(percent: number | undefined, width = 10): string {
   return "━".repeat(filled) + "─".repeat(width - filled);
 }
 
+/** A rate-limit window as `$.session.usage()` reports it. */
+export interface RateLimitReading {
+  kind: string;
+  percentUsed: number;
+  resetsAt?: string;
+}
+
+export interface RateLimitView {
+  label: string;
+  bar: string;
+  percent: string;
+  /** Time until the window resets; absent without `resetsAt`. */
+  resetIn?: string;
+  tone: Tone;
+}
+
+const LIMIT_LABEL: Record<string, string> = { five_hour: "5h", seven_day: "7d", spend_limit: "gasto" };
+
+/** Each window as "5h ▮▮▮▯▯▯ 42% · 2h10m": warn from 80%, error from 95%. */
+export function rateLimitView(limits: RateLimitReading[] | undefined, now: number): RateLimitView[] {
+  return (limits ?? []).map((l) => {
+    const view: RateLimitView = {
+      label: LIMIT_LABEL[l.kind] ?? l.kind,
+      bar: bar(l.percentUsed, 100, 6),
+      percent: `${l.percentUsed}%`,
+      tone: l.percentUsed >= 95 ? "error" : l.percentUsed >= 80 ? "warn" : "text",
+    };
+    const resetsAt = l.resetsAt ? Date.parse(l.resetsAt) : NaN;
+    if (Number.isFinite(resetsAt)) view.resetIn = fmtDuration(resetsAt - now);
+    return view;
+  });
+}
+
+export function rateLimitText(v: RateLimitView): string {
+  return `${v.label} ${v.bar} ${v.percent}${v.resetIn ? ` · ${v.resetIn}` : ""}`;
+}
+
 /** "claude-sonnet-5-5[1m]" → "Sonnet 5.5"; anything else is shown as given. */
 export function prettyModel(id: string | undefined): string | undefined {
   if (!id) return id;

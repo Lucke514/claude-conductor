@@ -22,6 +22,8 @@ import {
   parseVerdict,
   pickActiveSpec,
   prettyModel,
+  rateLimitText,
+  rateLimitView,
   specProgress,
   type CardView,
   type ProviderView,
@@ -94,7 +96,7 @@ async function loadCardConfig($: EngineInterface): Promise<void> {
   if ((await read($, placement)) !== where) await update($, placement, () => where)
 }
 
-/** Model, context use and cost as the status line has them; repo and branch from the working copy. */
+/** Model, context use, cost and rate-limit windows as the status line has them; repo and branch from the working copy. */
 async function loadMeta($: EngineInterface): Promise<void> {
   const next: SessionMeta = {}
   try {
@@ -106,6 +108,7 @@ async function loadMeta($: EngineInterface): Promise<void> {
     const usage = await $.session.usage()
     if (usage.context.percent !== undefined) next.ctxPercent = Math.round(usage.context.percent)
     if (usage.cost) next.costUsd = usage.cost.usd
+    next.rateLimits = usage.rateLimits.map(({ kind, percentUsed, resetsAt }) => ({ kind, percentUsed, resetsAt }))
   } catch {
     /* not reported on this surface */
   }
@@ -274,6 +277,16 @@ async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pa
   const run = (command: string) => () => void $.command.run({ command })
 
   const where = [m.repo, m.branch].filter(Boolean).join(' · ')
+  // Claude Code's own plan windows: in the side pane the status line is out of sight.
+  const limits = rateLimitView(m.rateLimits, await $.clock.now())
+  const usageLine = (
+    <Text key="usage">
+      {limits.length === 0 ? <Text color={PALETTE.dim}>usage —</Text> : ''}
+      {limits.map((l, i) => (
+        <Text key={`l${i}`} color={l.tone === 'text' ? MUTED : color(l.tone)}>{`${i > 0 ? '  ' : ''}${rateLimitText(l)}`}</Text>
+      ))}
+    </Text>
+  )
   const header = (
     <Box key="header" flexDirection={wide ? 'row' : 'column'} justifyContent="space-between">
       <Text>
@@ -291,7 +304,9 @@ async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pa
           </Text>
         ) : ''}
         <Text color={PALETTE.dim}>{fmtCost(m.costUsd)}</Text>
+        {wide ? <Text>{'  '}{usageLine}</Text> : ''}
       </Text>
+      {wide ? '' : usageLine}
     </Box>
   )
 
@@ -511,6 +526,17 @@ export const register: Register = on => {
       return next(e)
     }).catch(($, e, next) => next(e))
   }
+
+  // Pushed after each turn and when a window moves a whole point; no polling.
+  on('session.measure', async ($, e, next) => {
+    await update($, meta, (m: SessionMeta) => ({
+      ...m,
+      ...(e.context.percent !== undefined ? { ctxPercent: Math.round(e.context.percent) } : {}),
+      ...(e.cost ? { costUsd: e.cost.usd } : {}),
+      rateLimits: e.rateLimits.map(({ kind, percentUsed, resetsAt }) => ({ kind, percentUsed, resetsAt })),
+    })).catch(() => undefined)
+    return next(e)
+  })
 
   // The plugin's server, and the same server when the repo is opened as a project.
   for (const tool of ['mcp__plugin_multi-provider_multi-provider__delegate', 'mcp__multi-provider__delegate']) {

@@ -3,7 +3,14 @@
 
 export type Running = { provider: string; mode: string; task: string; startedAt: number }
 export type SessionTally = { calls: number; tokens: number }
-export type SessionMeta = { model?: string; ctxPercent?: number; costUsd?: number; repo?: string; branch?: string }
+export type SessionMeta = {
+  model?: string
+  ctxPercent?: number
+  costUsd?: number
+  repo?: string
+  branch?: string
+  rateLimits?: { kind: string; percentUsed: number; resetsAt?: string }[]
+}
 export type Cleaned = { at: number; rows: number }
 export type Placement = 'side' | 'below'
 

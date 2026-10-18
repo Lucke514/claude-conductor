@@ -32,7 +32,7 @@ const STATE = {
   ],
 }
 
-function world(on: On, files: Record<string, unknown>, pane: 'shown' | 'waiting' = 'waiting') {
+function world(on: On, files: Record<string, unknown>, pane: 'shown' | 'waiting' = 'waiting', rateLimits: unknown[] = []) {
   const clock = mock.clock(on, { now: NOW })
   mock.store(on)
   mock.env(on, { HOME: '/home/u' })
@@ -60,7 +60,7 @@ function world(on: On, files: Record<string, unknown>, pane: 'shown' | 'waiting'
     return { value: undefined }
   })
   on('ui.panes', async () => ({ value: open ? [{ id: 'conductor', title: 'conductor', isShown: pane === 'shown', isFocused: false, isPlaced: pane === 'shown' }] : [] }))
-  on('session.usage', async () => ({ value: { startedAt: 0, context: { tokens: 84000, window: 200000, percent: 42 }, rateLimits: [], cost: { usd: 0.5 } } }))
+  on('session.usage', async () => ({ value: { startedAt: 0, context: { tokens: 84000, window: 200000, percent: 42 }, rateLimits, cost: { usd: 0.5 } } }))
   on('session.repo', async () => ({ value: { root: '/repo', remote: null, internal: false, name: 'claude-conductor' } }))
   // What the engine draws when no plugin draws the band.
   on('ui.render', ($, e) => {
@@ -134,6 +134,33 @@ describe('conductor header', () => {
     const desk = await $.ui.mount({ ...BAND, surface: 'desktop' })
     expect(await text(desk)).toContain('◆ conductor')
     await desk.unmount()
+  })
+
+  test('Claude Code usage: rate-limit windows in the side pane and in the wide and narrow band', async ($, on) => {
+    const LIMITS = [
+      { kind: 'five_hour', percentUsed: 42, resetsAt: new Date(NOW + 130 * 60_000).toISOString() },
+      { kind: 'seven_day', percentUsed: 18.5 },
+    ]
+    const clock = world(on, FILES, 'shown', LIMITS)
+    const side = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const wideBand = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await $.command.run({ command: 'conductor', args: 'abajo' })
+    const narrowBand = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 80 }, surface: 'terminal' })
+    await clock.advance(1500)
+    for (const ui of [side, wideBand, narrowBand]) {
+      const t = await text(ui)
+      expect(t).toContain('5h ▮▮▮▯▯▯ 42% · 2h10m')
+      expect(t).toContain('7d ▮▯▯▯▯▯ 18.5%')
+    }
+    await Promise.all([side.unmount(), wideBand.unmount(), narrowBand.unmount()])
+  })
+
+  test('usage — when no window has a reading yet', async ($, on) => {
+    const clock = world(on, FILES)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await clock.advance(10)
+    expect(await text(ui)).toContain('usage —')
+    await ui.unmount()
   })
 
   test('first use teaches the next step', async ($, on) => {
