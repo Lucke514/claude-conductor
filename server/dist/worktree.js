@@ -83,10 +83,6 @@ export function gitConfigEnv(entries, env = process.env) {
     });
     return out;
 }
-/** Env forcing our hooks for every git process the worker starts. */
-export function workerGitEnv(meta, env = process.env) {
-    return gitConfigEnv([["core.hooksPath", meta.hooksDir]], env);
-}
 export async function readMeta(worktreePath) {
     assertManagedPath(worktreePath);
     const gitDir = await gitOk(["rev-parse", "--absolute-git-dir"], worktreePath);

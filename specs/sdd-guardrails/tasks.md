@@ -160,9 +160,9 @@ Coverage: surfaces API ✅ (R3, R6, R7, R8) · hooks ✅ (R1, R2) · worker envi
 Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 17 passed (17) · Tests 197 passed (197)` (baseline 181 passed (181); +16 new, 0 skipped) · `claude plugin validate .` ✅ `√ Validation passed` · `claude plugin test .` ✅ `7 pass, 0 fail` · Pipeline: `dist` ⏳ pending (local build leaves `server/dist` with no diff) · matrix ubuntu/macos/windows × Node 20/22 ⏳ pending
 Attribution: none — no failure required attribution
 Tests removed: none
-Clean-code sweep: none · close calls: `workerGitEnv` kept as a one-line wrapper over `gitConfigEnv` — its existing test in `delegate.spec.ts` still pins the hooks-only shape
+Clean-code sweep: 1 hit — `workerGitEnv` left unreached by T1 (only its test called it); removed, its test moved to `gitConfigEnv` · close calls: none
 Shortcuts declared: none
-Dead-code sweep: none — `tsc --noUnusedLocals --noUnusedParameters` reports nothing in the change set; `workerGitEnv` is still reached by `delegate.spec.ts` only — kept as the tested hooks-only helper (close call above) (scope: this tree)
+Dead-code sweep: 1 hit, fixed — `workerGitEnv` (`server/src/worktree.ts`) had no production caller after T1 and was deleted; `tsc --noUnusedLocals --noUnusedParameters` reports nothing else in the change set (scope: this tree)
 Excluded from inventory: none
 Documentation: `docs/sdd-guardrails.md` (with Operating), README and skill match the names in the code (checked by grep against `server/src`)
 Success criteria: SC1 met on emission — `worker_push` is emitted and audited (`guardrails.spec.ts` R6 and R8 cases); its value is read on the user's remote · SC2 pending — needs a real `codex` run asking it to push and open a PR, on the user's machine

@@ -133,11 +133,6 @@ export function gitConfigEnv(entries: [string, string][], env: NodeJS.ProcessEnv
   return out;
 }
 
-/** Env forcing our hooks for every git process the worker starts. */
-export function workerGitEnv(meta: WorktreeMeta, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  return gitConfigEnv([["core.hooksPath", meta.hooksDir]], env);
-}
-
 export async function readMeta(worktreePath: string): Promise<WorktreeMeta> {
   assertManagedPath(worktreePath);
   const gitDir = await gitOk(["rev-parse", "--absolute-git-dir"], worktreePath);
