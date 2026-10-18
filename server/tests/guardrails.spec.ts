@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { delegate } from "../src/delegate.js";
 import { StateStore } from "../src/state.js";
 import { CREDENTIAL_ENV, GH_SHIM_MESSAGE, pathKey, shimDir, workerEnv } from "../src/worker-env.js";
-import { removeWorktree, readMeta } from "../src/worktree.js";
+import { applyWorktree, removeWorktree, readMeta } from "../src/worktree.js";
 import { makeRepo, testConfig, tmpDir } from "./helpers.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
@@ -88,5 +88,37 @@ describe("sealed worker environment (R4, R5)", () => {
     const { r } = await probe(repo);
     expect(r.filesChanged).toEqual(["added.txt"]);
     await removeWorktree(await readMeta(r.worktreePath!));
+  });
+});
+
+function sddRepo() {
+  const repo = makeRepo();
+  mkdirSync(path.join(repo, "specs", "demo"), { recursive: true });
+  writeFileSync(path.join(repo, "specs", "demo", "tasks.md"), "# Tasks\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "specs");
+  return repo;
+}
+
+describe("specs/ is off limits (R3, E2)", () => {
+  it("restores the worker's specs/ edits, keeps them out of the diff and of delegation_apply", async () => {
+    const repo = sddRepo();
+    process.env.FAKE_WRITE_FILE = "specs/demo/tasks.md,index.ts,specs/new/spec.md";
+    const { r } = await probe(repo);
+    expect(r.filesChanged).toEqual(["index.ts"]);
+    expect(r.diff).not.toContain("specs/");
+    expect(r.violations).toContainEqual(expect.objectContaining({ type: "specs_modified", files: ["specs/demo/tasks.md", "specs/new/spec.md"] }));
+    const applied = await applyWorktree(r.worktreePath!, "t");
+    expect(applied).toMatchObject({ applied: true, files: ["index.ts"] });
+    expect(readFileSync(path.join(repo, "specs/demo/tasks.md"), "utf8")).toBe("# Tasks\n");
+    expect(existsSync(path.join(repo, "specs/new"))).toBe(false);
+    expect(git(repo, "status", "--porcelain").replace(/^.. /, "")).toBe("index.ts");
+  });
+
+  it("read mode reports specs_modified next to write_in_read_mode", async () => {
+    const repo = sddRepo();
+    process.env.FAKE_WRITE_FILE = "specs/demo/tasks.md,index.ts";
+    const { r } = await probe(repo, "read");
+    expect(r.violations?.map((v) => v.type).sort()).toEqual(["specs_modified", "write_in_read_mode"]);
   });
 });

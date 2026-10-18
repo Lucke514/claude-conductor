@@ -38,8 +38,8 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 
 ## T2 — `specs/` intocable
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C2 · **Implements**: R3, E2
 - **Files**: `server/src/worktree.ts`, `server/tests/guardrails.spec.ts`
 - **Do**: en `collectChanges`, restaurar `specs/` (`git checkout <base> -- specs`, `git clean -fdq -- specs`) antes del `git add -A` y registrar `specs_modified` con los archivos; ampliar el tipo `Violation`.
@@ -49,7 +49,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
   - `delegation_apply` deja `specs/` como estaba.
   - En modo read se registran `specs_modified` y `write_in_read_mode`.
 - **Verify**: `npm --prefix server test -- guardrails`
-- **Notes**: —
+- **Notes**: `restoreSpecs` en `collectChanges` (`server/src/worktree.ts`): reset del índice, checkout y clean de `specs/` contra la base, violación `specs_modified` con los archivos; `Violation` pasa a unión; 2 casos en `server/tests/guardrails.spec.ts` (write + `delegation_apply`, y read); commit `sdd-guardrails: T2 keep workers out of specs/`. Gates: typecheck 0 errores, 187 passed. Clean-code: none · close calls: el `checkout` solo corre si la base tiene archivos en `specs/` — se queda, sin ellos git falla con "pathspec did not match"
 
 ## T3 — Comprobación de push al remoto
 

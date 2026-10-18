@@ -131,6 +131,14 @@ export async function collectChanges(meta, maxDiffBytes, id) {
             headAfter,
         });
     }
+    const specs = await restoreSpecs(meta, noHooks);
+    if (specs.length > 0) {
+        violations.push({
+            type: "specs_modified",
+            detail: `worker changed ${specs.length} file(s) under specs/; they were restored and left out of the diff: ${specs.slice(0, 10).join(", ")}`,
+            files: specs,
+        });
+    }
     await gitOk([...noHooks, "add", "-A"], meta.path);
     if (meta.symlinks.length > 0) {
         await git([...noHooks, "reset", "-q", "--", ...meta.symlinks], meta.path);
@@ -155,6 +163,21 @@ export async function collectChanges(meta, maxDiffBytes, id) {
         ...(patchFile ? { patchFile } : {}),
         violations,
     };
+}
+/** Put `specs/` back as it was at the base commit; returns the paths the worker had changed. */
+async function restoreSpecs(meta, noHooks) {
+    const lines = async (args) => (await git(args, meta.path)).stdout.split(/\r?\n/).filter(Boolean);
+    const changed = new Set([
+        ...(await lines(["diff", "--name-only", meta.baseCommit, "--", "specs"])),
+        ...(await lines(["ls-files", "--others", "--exclude-standard", "--", "specs"])),
+    ]);
+    if (changed.size === 0)
+        return [];
+    await git([...noHooks, "reset", "-q", meta.baseCommit, "--", "specs"], meta.path);
+    if ((await lines(["ls-files", "--", "specs"])).length > 0)
+        await gitOk([...noHooks, "checkout", "--", "specs"], meta.path);
+    await gitOk([...noHooks, "clean", "-fdq", "--", "specs"], meta.path);
+    return [...changed].sort();
 }
 export async function removeWorktree(meta) {
     assertManagedPath(meta.path);
