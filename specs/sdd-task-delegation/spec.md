@@ -77,6 +77,7 @@ Permitir que Claude delegue a Codex o Antigravity **una tarea concreta** (`T#` o
 - 2026-10-18 El modo por defecto es write (R10); `--read` queda para investigación — porque una tarea de `tasks.md` es trabajo de implementación.
 - 2026-10-18 Spec aprobado por el usuario.
 - 2026-10-18 Plan aprobado por el usuario.
+- 2026-10-18 Tasks aprobadas por el usuario.
 
 ## Open questions
 

@@ -3,7 +3,7 @@
 # Tasks: Delegación de tareas SDD
 
 > Spec: [spec.md](./spec.md) · Plan: [plan.md](./plan.md)
-> Status: in-review
+> Status: approved
 > Last updated: 2026-10-18
 
 Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan pasan sin fallos nuevos contra su baseline (`npm --prefix server run typecheck`, `npm --prefix server test`, `claude plugin validate .`, `claude plugin test .`), `server/dist` está reconstruido y committeado si la tarea toca `server/src`, y el diff está limpio. Commits con prefijo `sdd-task-delegation: `, solo de Claude y sin trailers de atribución.
