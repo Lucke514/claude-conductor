@@ -133,7 +133,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 
 ### Verification report — sdd-guardrails — 2026-10-18 — pass 1
 
-Change set: `e4c44fe` (`main@30f6cb7...HEAD`)
+Change set: `2c0ddcc` (`main@30f6cb7...HEAD`; later commits touch only this file)
 Converged: no — pipeline gates pending (step 4)
 
 | Req | Verdict | Evidence (case · assertion · clause) |
@@ -166,4 +166,4 @@ Dead-code sweep: 1 hit, fixed — `workerGitEnv` (`server/src/worktree.ts`) had 
 Excluded from inventory: none
 Documentation: `docs/sdd-guardrails.md` (with Operating), README and skill match the names in the code (checked by grep against `server/src`)
 Success criteria: SC1 met on emission — `worker_push` is emitted and audited (`guardrails.spec.ts` R6 and R8 cases); its value is read on the user's remote · SC2 pending — needs a real `codex` run asking it to push and open a PR, on the user's machine
-Integration: not opened yet
+Integration: pending review (PR to main)
