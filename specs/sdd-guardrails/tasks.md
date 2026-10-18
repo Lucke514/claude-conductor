@@ -39,7 +39,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 ## T2 — `specs/` intocable
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C2 · **Implements**: R3, E2
 - **Files**: `server/src/worktree.ts`, `server/tests/guardrails.spec.ts`
 - **Do**: en `collectChanges`, restaurar `specs/` (`git checkout <base> -- specs`, `git clean -fdq -- specs`) antes del `git add -A` y registrar `specs_modified` con los archivos; ampliar el tipo `Violation`.
