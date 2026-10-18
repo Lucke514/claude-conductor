@@ -1,0 +1,6 @@
+node_modules/
+server/.install.lock/
+*.log
+.DS_Store
+coverage/
+# server/dist is committed on purpose: marketplace installs copy the repo without building.

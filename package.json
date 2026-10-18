@@ -1,0 +1,16 @@
+{
+  "name": "claude-conductor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code marketplace with the multi-provider plugin (delegate to Codex / Antigravity CLIs)",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "postinstall": "npm --prefix server install",
+    "build": "npm --prefix server run build",
+    "test": "npm --prefix server test",
+    "typecheck": "npm --prefix server run typecheck"
+  }
+}
