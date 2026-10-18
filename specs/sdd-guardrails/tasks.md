@@ -17,7 +17,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 ## T1 — Entorno sellado del worker
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C1 · **Implements**: R4, R5, E5, E8, E9
 - **Files**: `server/src/worker-env.ts`, `server/src/worktree.ts`, `server/src/delegate.ts`, `server/tests/fixtures/fake-codex.mjs`, `server/tests/guardrails.spec.ts`
 - **Do**:
