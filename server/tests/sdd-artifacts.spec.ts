@@ -1,11 +1,18 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkReferences, loadFeature, parseGates, parseScope, parseStatus, parseVerificationReports, readFeatureArtifacts, resolveTask, SddError } from "../src/sdd/artifacts.js";
+import { checkReferences, loadFeature, parseGates, parseTasks, parseScope, parseStatus, parseVerificationReports, readFeatureArtifacts, resolveTask, SddError } from "../src/sdd/artifacts.js";
 import { tmpDir } from "./helpers.js";
 import { DELEGATION_REPORT, INTEGRATION_SCOPE, PLAN, SPEC, TASKS, writeFeature } from "./sdd-fixtures.js";
 
 describe("sdd artifacts", () => {
+  it("nested-repos R4: reads **Repo** (with or without backticks); — or a missing field means no repo", () => {
+    const tasks = parseTasks(
+      "## T1 — a\n\n- [ ] Open\n- **Owner**: —\n- **Repo**: backend-monolith\n\n## T2 — b\n\n- [ ] Open\n- **Repo**: `web-app`\n\n## T3 — c\n\n- **Repo**: —\n\n## T4 — d\n",
+    );
+    expect(tasks.map((t) => t.repo)).toEqual(["backend-monolith", "web-app", undefined, undefined]);
+  });
+
   it("R1: resolves T3 with its fields, verbatim text (E8) and parallel flag", async () => {
     const root = tmpDir();
     writeFeature(root, "demo", { "spec.md": SPEC, "plan.md": PLAN, "tasks.md": TASKS });

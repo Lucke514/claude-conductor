@@ -1,6 +1,7 @@
 import { delegate, type DelegateContext, type DelegateResponse } from "../delegate.js";
 import { routeTask } from "../fallback.js";
 import { PROVIDER_NAMES, type Mode, type ProviderName } from "../providers/types.js";
+import { resolveTaskRepo, workspaceRepos, type TaskRepo } from "../repo.js";
 import { checkReferences, loadFeature, resolveTask, SddError, type SddFeature, type SddTask } from "./artifacts.js";
 import { acceptanceItems, ACCEPTANCE_VERDICTS, buildTaskBrief, type AcceptanceItem } from "./brief.js";
 import { checkDelegable, claimCommitted, commitCommand, notCommittedError, ownerValue, writeOwner } from "./claim.js";
@@ -17,6 +18,8 @@ export interface ClaimResponse {
   title: string;
   provider: ProviderName;
   owner: string;
+  /** The repo the task works on (its `**Repo**`, resolved), relative to the project. */
+  repo?: string;
   tasksFile: string;
   commit: string;
   nextSteps: string[];
@@ -69,6 +72,8 @@ export async function sddTaskClaim(
   const { feature, task } = await loadTask(ctx.projectDir, args.slug, args.task);
   checkDelegable(feature, task);
   const provider = pickProvider(args.provider ?? "auto", feature, task, ctx);
+  // R4: an unknown **Repo** fails before the Owner is written.
+  const target = task.repo ? await resolveTaskRepo(ctx.projectDir, feature.slug, task.repo) : undefined;
   const owner = ownerValue(provider);
   await writeOwner(ctx.projectDir, feature, task.id, owner);
   const commit = commitCommand(feature, task.id, "claim").display;
@@ -78,6 +83,7 @@ export async function sddTaskClaim(
     title: task.title,
     provider,
     owner,
+    ...(target ? { repo: target.rel } : {}),
     tasksFile: feature.tasksFile,
     commit,
     nextSteps: [
@@ -134,12 +140,16 @@ export async function sddTaskDelegate(
   const provider = m[1] as ProviderName;
   const mode = args.mode ?? "write";
   const brief = buildTaskBrief(feature, task);
+  const target: TaskRepo | undefined = task.repo ? await resolveTaskRepo(ctx.projectDir, feature.slug, task.repo) : undefined;
+  // Files of a task with **Repo** are relative to that repo; a `<Repo>/` prefix is accepted too.
+  const inRepo = (files: string[]) => (task.repo ? files.map((f) => (f.startsWith(`${task.repo}/`) ? f.slice(task.repo!.length + 1) : f)) : files);
   const r = await delegate(
     {
       provider,
       task: brief.task,
-      files: brief.files,
-      scopeFiles: task.files,
+      files: inRepo(brief.files),
+      scopeFiles: inRepo(task.files),
+      ...(target ? { repo: target.rel } : {}),
       extraOutput: brief.extraOutput,
       mode,
       fallback: true,
@@ -151,7 +161,13 @@ export async function sddTaskDelegate(
   );
 
   // A cancelled worker's partial diff is not verified: the user asked it to stop.
-  const verification = r.worktreePath && r.status === "success" ? await verifyTask(r.worktreePath, task, feature.gates, ctx.config.verify.timeoutMs) : [];
+  const verification =
+    r.worktreePath && r.status === "success"
+      ? await verifyTask(r.worktreePath, task, feature.gates, ctx.config.verify.timeoutMs, {
+          ...(task.repo ? { repo: task.repo } : {}),
+          workspaceRepos: await workspaceRepos(ctx.projectDir),
+        })
+      : [];
   const acceptance = parseAcceptance(r.output, acceptanceItems(feature, task));
   // Pipeline-only gates are read from CI later; anything else must have run and passed.
   const drift = (r.violations ?? []).flatMap((v) => (v.type === "outside_task_files" ? v.files : []));
@@ -166,7 +182,7 @@ export async function sddTaskDelegate(
     drift,
     notesDraft: notesDraft(r, task, verification, acceptance),
   };
-  const notes = [...(r.notes ?? [])];
+  const notes = [...(target?.notes ?? []), ...(r.notes ?? [])];
   const steps: string[] = [];
   if (r.status === "cancelled" || r.status === "partial") {
     // A cancelled or partial task stays claimed: the user decides whether to resume or hand it back.

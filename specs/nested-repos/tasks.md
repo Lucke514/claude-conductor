@@ -65,8 +65,8 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
 
 ## T3 — `**Repo**` en `sdd_task_*` y gates por repo
 
-- [ ] Open
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C3 · **Implements**: R4, R5, E3
 - **Files**: `server/src/sdd/artifacts.ts`, `server/src/sdd/task-delegation.ts`, `server/src/sdd/verify.ts`, `server/src/repo.ts`, `server/tests/sdd-fixtures.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/sdd-verify.spec.ts`, `server/tests/sdd-artifacts.spec.ts`
 - **Do**:
@@ -83,11 +83,12 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
   - un gate con `Where` = otro repo → `manual`;
   - una tarea sin `**Repo**` se comporta como hoy.
 - **Verify**: `npm --prefix server test -- sdd`
+- **Notes**: Hecha por Claude. `SddTask.repo` sale de `**Repo**` (con o sin backticks). En `repo.ts`, `resolveTaskRepo` prueba el worktree de la spec y después la raíz (E3 anota el descarte), y `workspaceRepos` lista los repos de primer nivel. `sdd_task_claim` resuelve el repo antes de `writeOwner` y lo devuelve. `sdd_task_delegate` pasa `repo` y quita el prefijo `<Repo>/` de `files` y `scopeFiles`. `verifyTask` acepta `{ repo, workspaceRepos }` y deja `manual` un gate cuyo `Where` es otro repo. `claimCommitted` no cambia (raíz). 5 casos en `sdd-task-delegation.spec.ts` (SC2 con un worktree de spec en `feat/demo`, raíz, `REPO_NOT_FOUND`, E3, gate de otro repo) y 1 en `sdd-artifacts.spec.ts`. Gates: typecheck 0 errores, 291 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: `resolveTaskRepo` corre dos veces (claim y delegate) porque el repo resuelto no se guarda en `tasks.md`; es barato y refleja el estado actual del disco
 
 ## T4 — Registro de repos y listados
 
 - [ ] Open
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C4 · **Implements**: R11, E5
 - **Files**: `server/src/state.ts`, `server/src/worktree.ts`, `server/src/delegate.ts`, `server/src/index.ts`, `server/src/hooks.ts`, `server/src/sdd/pipeline.ts`, `server/tests/guardrails.spec.ts`, `server/tests/hooks-setup.spec.ts`, `server/tests/sdd-pipeline.spec.ts`
 - **Do**:

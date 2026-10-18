@@ -72,7 +72,19 @@ async function run(cwd: string, command: string, timeoutMs: number): Promise<Pic
   };
 }
 
-export async function verifyTask(worktreePath: string, task: SddTask, gates: QualityGate[], timeoutMs: number): Promise<VerifyItem[]> {
+/** The repo a gate's `Where` names, when it is a repo of the workspace other than the task's (R5 of nested-repos). */
+function otherRepo(where: string, repos: { repo?: string; workspaceRepos?: string[] }): string | undefined {
+  const name = where.replace(/`/g, "").trim().replace(/\/+$/, "");
+  return name && name !== repos.repo && repos.workspaceRepos?.includes(name) ? name : undefined;
+}
+
+export async function verifyTask(
+  worktreePath: string,
+  task: SddTask,
+  gates: QualityGate[],
+  timeoutMs: number,
+  repos: { repo?: string; workspaceRepos?: string[] } = {},
+): Promise<VerifyItem[]> {
   const items: VerifyItem[] = [];
   if (task.verifyCommands.length === 0) {
     items.push({ kind: "verify", command: task.verify ?? "—", result: "manual", reason: "the task's Verify is a manual check" });
@@ -82,6 +94,11 @@ export async function verifyTask(worktreePath: string, task: SddTask, gates: Qua
     for (const command of g.commands) {
       if (g.pipelineOnly) {
         items.push({ kind: "gate", gate: g.gate, command, result: "manual", reason: "pipeline-only gate: read it from CI on this change set", baseline: g.baseline });
+        continue;
+      }
+      const elsewhere = otherRepo(g.where, repos);
+      if (elsewhere) {
+        items.push({ kind: "gate", gate: g.gate, command, result: "manual", reason: `runs in ${elsewhere}, not in this task's repo: run it there yourself`, baseline: g.baseline });
         continue;
       }
       const r = await run(worktreePath, command, timeoutMs);
