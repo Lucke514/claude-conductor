@@ -10,5 +10,14 @@
   "homepage": "https://github.com/Lucke514/claude-conductor",
   "repository": "https://github.com/Lucke514/claude-conductor",
   "license": "MIT",
-  "keywords": ["mcp", "codex", "antigravity", "agy", "delegation", "multi-agent", "orchestration"]
+  "keywords": [
+    "mcp",
+    "codex",
+    "antigravity",
+    "agy",
+    "delegation",
+    "multi-agent",
+    "orchestration"
+  ],
+  "types": "./types/index.d.ts"
 }

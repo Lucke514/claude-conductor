@@ -51,6 +51,10 @@ describe("delegate (integration with fake CLIs)", () => {
     expect(state.providers.codex?.metrics?.callsToday).toBe(1);
     expect(state.providers.codex?.metrics?.tokensToday).toBe(1500);
     expect(state.sessions["test-instance"]?.providers.codex?.calls).toBe(1);
+    // Conductor card data: recent delegations and per-provider call history.
+    expect(state.recent?.[0]).toMatchObject({ id: r.id, provider: "codex", mode: "read", status: "success", task: "review index.ts" });
+    expect(state.providers.codex?.history).toHaveLength(1);
+    expect(state.providers.codex?.history?.[0]).toMatchObject({ ok: true, tokens: 1500 });
     const log = readdirSync(logsDir()).map((f) => readFileSync(path.join(logsDir(), f), "utf8")).join("");
     const entry = log.trim().split("\n").map((l) => JSON.parse(l)).find((e) => e.id === r.id);
     expect(entry).toMatchObject({ provider: "codex", status: "success", mode: "read" });

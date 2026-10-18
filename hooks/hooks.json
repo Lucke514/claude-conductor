@@ -1,5 +1,8 @@
 {
   "description": "multi-provider: confirm write-mode delegations, verify worker diffs, health check on start, strip AI attribution from PR bodies/commits",
+  "modules": [
+    "./conductor/card.tsx"
+  ],
   "hooks": {
     "PreToolUse": [
       {

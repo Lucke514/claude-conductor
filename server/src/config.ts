@@ -87,6 +87,12 @@ export const ConfigSchema = z.object({
       compose: z.string().optional(),
     })
     .prefault({}),
+  card: z
+    .object({
+      /** Conductor card (band above the prompt, Claude Code with plugin UI modules). */
+      enabled: z.boolean().default(true),
+    })
+    .prefault({}),
   providers: z
     .object({
       codex: ProviderSchema.prefault({}),

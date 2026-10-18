@@ -5,7 +5,7 @@ import { repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt } from "./prompt-builder.js";
 import { PROVIDER_NAMES } from "./providers/types.js";
-import { recordCall } from "./state.js";
+import { recordCall, recordRecent, taskLabel } from "./state.js";
 import { collectChanges, createWorktree, removeWorktree, workerGitEnv } from "./worktree.js";
 export async function delegate(params, ctx) {
     const started = Date.now();
@@ -152,6 +152,19 @@ export async function delegate(params, ctx) {
         if (notes.length > 0)
             response.notes = notes;
         response.nextSteps = nextSteps(response);
+        await ctx.store
+            .update((s) => recordRecent(s, {
+            id,
+            at: new Date().toISOString(),
+            requested: params.provider,
+            provider: response.provider,
+            mode,
+            status: response.status,
+            task: taskLabel(params.task),
+            durationMs: response.durationMs,
+            ...(response.filesChanged ? { filesChanged: response.filesChanged.length } : {}),
+        }))
+            .catch(() => undefined);
         await appendAudit({
             id,
             ts: new Date().toISOString(),

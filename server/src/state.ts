@@ -42,10 +42,33 @@ export interface SessionMetrics {
   providers: Partial<Record<ProviderName, { calls: number; tokens: number; durationMs: number }>>;
 }
 
+/** One call, newest last (sparkline in the conductor card). */
+export interface CallPoint {
+  at: string;
+  ok: boolean;
+  tokens: number;
+  durationMs: number;
+}
+
 export interface ProviderState {
   breaker?: BreakerSnapshot;
   health?: HealthSnapshot;
   metrics?: ProviderMetrics;
+  history?: CallPoint[];
+}
+
+/** One delegation as the conductor card lists it, newest first. */
+export interface RecentDelegation {
+  id: string;
+  at: string;
+  requested: string;
+  provider: ProviderName | null;
+  mode: "read" | "write";
+  status: string;
+  /** First characters of the task, for the card only (never in the audit log). */
+  task: string;
+  filesChanged?: number;
+  durationMs: number;
 }
 
 export interface MpState {
@@ -55,9 +78,13 @@ export interface MpState {
   providers: Partial<Record<ProviderName, ProviderState>>;
   /** Keyed by Claude Code session_id when known, else by MCP server instance id. */
   sessions: Record<string, SessionMetrics>;
+  recent?: RecentDelegation[];
 }
 
 const MAX_SESSIONS = 30;
+export const MAX_HISTORY = 10;
+export const MAX_RECENT = 8;
+export const TASK_LABEL_CHARS = 60;
 
 export function emptyState(): MpState {
   return { version: 1, updatedAt: new Date().toISOString(), chain: [], providers: {}, sessions: {} };
@@ -134,6 +161,9 @@ export function recordCall(s: MpState, rec: CallRecord, now = new Date()): void 
   m.lastCallAt = now.toISOString();
   if (rec.error) m.lastError = { ...rec.error, message: rec.error.message.slice(0, 200), at: now.toISOString() };
   p.metrics = m;
+  const hist = p.history ?? [];
+  hist.push({ at: now.toISOString(), ok: !rec.error, tokens, durationMs: rec.durationMs });
+  p.history = hist.slice(-MAX_HISTORY);
 
   const sess = (s.sessions[rec.sessionKey] ??= { lastAt: now.toISOString(), providers: {} });
   sess.lastAt = now.toISOString();
@@ -141,4 +171,13 @@ export function recordCall(s: MpState, rec: CallRecord, now = new Date()): void 
   sp.calls++;
   sp.tokens += tokens;
   sp.durationMs += rec.durationMs;
+}
+
+export function taskLabel(task: string): string {
+  const oneLine = task.replace(/\s+/g, " ").trim();
+  return oneLine.length > TASK_LABEL_CHARS ? `${oneLine.slice(0, TASK_LABEL_CHARS - 1)}…` : oneLine;
+}
+
+export function recordRecent(s: MpState, d: RecentDelegation): void {
+  s.recent = [d, ...(s.recent ?? []).filter((r) => r.id !== d.id)].slice(0, MAX_RECENT);
 }
