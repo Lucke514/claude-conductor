@@ -18,8 +18,8 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 
 ## T1 — `runProcess`: cancelación, salida en vivo y timeout por inactividad
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C1, C3 · **Implements**: R4, R6
 - **Files**: `server/src/process.ts`, `server/tests/process.spec.ts`
 - **Do**: Agregar a `RunOptions`:
@@ -36,12 +36,12 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
   - `onOutput` recibe la salida en orden;
   - los tests existentes siguen pasando.
 - **Verify**: `npm --prefix server test -- process`
-- **Notes**: —
+- **Notes**: Hecha por Claude. `stopper()` en `server/src/process.ts` concentra las tres paradas (total, inactividad, señal) para los dos runners, spawn y PTY. `RunOptions` gana `signal`, `onOutput` (salida ANSI-stripped bajo PTY) e `idleTimeoutMs`; `RunResult` gana `cancelled` y `stalled`. Una señal ya abortada no lanza el proceso. `server/tests/process.spec.ts` tiene 5 casos con procesos `node` reales, incluido un nieto para comprobar que se mata el árbol. Gates: typecheck 0 errores, 241 passed (236 + 5), plugin validate ok, plugin test 11 pass. Clean-code: none · close calls: none
 
 ## T2 — Cancelación en la cadena, `delegate` y las herramientas
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C1 · **Implements**: R6, E3
 - **Files**: `server/src/providers/types.ts`, `server/src/providers/codex.ts`, `server/src/providers/antigravity.ts`, `server/src/fallback.ts`, `server/src/delegate.ts`, `server/src/sdd/task-delegation.ts`, `server/src/index.ts`, `server/tests/delegate.spec.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/fixtures/fake-codex.mjs`
 - **Do**:

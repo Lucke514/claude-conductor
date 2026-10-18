@@ -152,6 +152,44 @@ class TailBuffer {
     }
 }
 /**
+ * The three ways a run is stopped from outside: total timeout, no output for
+ * `idleTimeoutMs`, and an aborted signal. `kill` terminates the tree; `touch`
+ * restarts the idle clock on each chunk of output.
+ */
+function stopper(opts, kill) {
+    let reason;
+    const stop = (r) => {
+        if (reason)
+            return;
+        reason = r;
+        kill(r);
+    };
+    const total = setTimeout(() => stop("timeout"), opts.timeoutMs);
+    total.unref();
+    let idle;
+    const touch = () => {
+        if (!opts.idleTimeoutMs || reason)
+            return;
+        clearTimeout(idle);
+        idle = setTimeout(() => stop("stalled"), opts.idleTimeoutMs);
+        idle.unref();
+    };
+    const onAbort = () => stop("cancelled");
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+    touch();
+    return {
+        touch,
+        get reason() {
+            return reason;
+        },
+        dispose() {
+            clearTimeout(total);
+            clearTimeout(idle);
+            opts.signal?.removeEventListener("abort", onAbort);
+        },
+    };
+}
+/**
  * node-pty 1.x ships its macOS `spawn-helper` prebuild without the exec bit, so every
  * PTY spawn fails ("posix_spawnp failed") until it is chmod'ed. Best effort, no-op elsewhere.
  */
@@ -199,11 +237,16 @@ export async function runProcess(opts) {
             stdout: "",
             stderr: "",
             timedOut: false,
+            cancelled: false,
+            stalled: false,
             durationMs: 0,
             spawnError: { code: "ENOENT", message: `binary not found in PATH: ${opts.command}` },
             usedPty: false,
             notes,
         };
+    }
+    if (opts.signal?.aborted) {
+        return { exitCode: null, signal: null, stdout: "", stderr: "", timedOut: false, cancelled: true, stalled: false, durationMs: 0, usedPty: false, notes };
     }
     const args = [...resolved.prefixArgs, ...opts.args];
     const env = buildChildEnv(opts.env);
@@ -229,19 +272,21 @@ function runWithSpawn(command, args, opts, env, start, notes) {
     const stderr = new TailBuffer(max);
     return new Promise((resolve) => {
         let child;
-        let timedOut = false;
         let settled = false;
+        let stop;
         const finish = (r) => {
             if (settled)
                 return;
             settled = true;
-            clearTimeout(timer);
+            stop?.dispose();
             clearTimeout(hardTimer);
             resolve({
                 ...r,
                 stdout: stdout.toString(),
                 stderr: stderr.toString(),
-                timedOut,
+                timedOut: stop?.reason === "timeout",
+                cancelled: stop?.reason === "cancelled",
+                stalled: stop?.reason === "stalled",
                 durationMs: Date.now() - start,
                 usedPty: false,
                 notes,
@@ -265,6 +310,8 @@ function runWithSpawn(command, args, opts, env, start, notes) {
                 stdout: "",
                 stderr: "",
                 timedOut: false,
+                cancelled: false,
+                stalled: false,
                 durationMs: Date.now() - start,
                 spawnError: { code: e.code, message: e.message },
                 usedPty: false,
@@ -273,8 +320,7 @@ function runWithSpawn(command, args, opts, env, start, notes) {
             return;
         }
         let hardTimer;
-        const timer = setTimeout(() => {
-            timedOut = true;
+        stop = stopper(opts, () => {
             killTree(child.pid, "SIGTERM");
             hardTimer = setTimeout(() => {
                 killTree(child.pid, "SIGKILL");
@@ -282,10 +328,14 @@ function runWithSpawn(command, args, opts, env, start, notes) {
                 setTimeout(() => finish({ exitCode: null, signal: "SIGKILL" }), 500).unref();
             }, KILL_GRACE_MS);
             hardTimer.unref();
-        }, opts.timeoutMs);
-        timer.unref();
-        child.stdout?.setEncoding("utf8").on("data", (d) => stdout.push(d));
-        child.stderr?.setEncoding("utf8").on("data", (d) => stderr.push(d));
+        });
+        const onData = (buf) => (d) => {
+            buf.push(d);
+            stop?.touch();
+            opts.onOutput?.(d);
+        };
+        child.stdout?.setEncoding("utf8").on("data", onData(stdout));
+        child.stderr?.setEncoding("utf8").on("data", onData(stderr));
         child.on("error", (err) => {
             finish({ exitCode: null, signal: null, spawnError: { code: err.code, message: err.message } });
         });
@@ -308,26 +358,26 @@ function runWithPty(pty, command, args, opts, env, start, notes) {
         env: { ...env, TERM: env.TERM ?? "xterm-256color" },
     });
     return new Promise((resolve) => {
-        let timedOut = false;
         let settled = false;
         const finish = (exitCode, signal) => {
             if (settled)
                 return;
             settled = true;
-            clearTimeout(timer);
+            stop.dispose();
             resolve({
                 exitCode,
                 signal,
                 stdout: stripAnsi(out.toString()),
                 stderr: "",
-                timedOut,
+                timedOut: stop.reason === "timeout",
+                cancelled: stop.reason === "cancelled",
+                stalled: stop.reason === "stalled",
                 durationMs: Date.now() - start,
                 usedPty: true,
                 notes,
             });
         };
-        const timer = setTimeout(() => {
-            timedOut = true;
+        const stop = stopper(opts, () => {
             killTree(proc.pid, "SIGTERM");
             try {
                 proc.kill();
@@ -339,9 +389,12 @@ function runWithPty(pty, command, args, opts, env, start, notes) {
                 killTree(proc.pid, "SIGKILL");
                 finish(null, "SIGKILL");
             }, KILL_GRACE_MS).unref();
-        }, opts.timeoutMs);
-        timer.unref();
-        proc.onData((d) => out.push(d));
+        });
+        proc.onData((d) => {
+            out.push(d);
+            stop.touch();
+            opts.onOutput?.(stripAnsi(d));
+        });
         proc.onExit(({ exitCode, signal }) => finish(exitCode, signal ? String(signal) : null));
         if (opts.input !== undefined) {
             proc.write(opts.input);
