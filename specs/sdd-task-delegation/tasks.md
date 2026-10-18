@@ -55,7 +55,7 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 ## T5 — Herramientas MCP `sdd_task_*`
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C5 · **Implements**: R1, R5, R6, R8, R9, E6, E9
 - **Files**: `server/src/sdd/task-delegation.ts`, `server/src/index.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/fixtures/fake-codex.mjs`
 - **Do**: Implementar y registrar `sdd_task_claim`, `sdd_task_delegate` (mode por defecto write, provider del Owner, error sin worker si el claim no está committeado, C4 tras el diff, `sdd.acceptance` parseado y `notesDraft` con el id, handback en `fallback_to_claude`/`failed`) y `sdd_task_release`. Añadir al CLI falso un modo que emita la sección `## Acceptance`.
