@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "./config.js";
 import { checkHealth, makeAdapters, type ProviderStatus } from "./health.js";
 import { ptyAvailable } from "./process.js";
 import { PROVIDER_NAMES, type ProviderAdapter, type ProviderName } from "./providers/types.js";
+import { pluginRoot } from "./setup.js";
 import type { StateStore } from "./state.js";
 
 export type CheckLevel = "ok" | "warn" | "fail" | "skip";
@@ -30,6 +31,8 @@ export interface DoctorOptions {
   live: boolean;
   liveTimeoutMs?: number;
   adapters?: Record<ProviderName, ProviderAdapter>;
+  /** Plugin root whose .mcp.json is checked (defaults to the running plugin). */
+  pluginRoot?: string;
 }
 
 const SMOKE_PROMPT = "This is a connectivity check. Do not read or modify any file. Reply with exactly: OK";
@@ -40,6 +43,30 @@ function gitVersion(): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Resolve the plugin's .mcp.json the way Claude Code does for plugins: only the
+ * literal "${CLAUDE_PLUGIN_ROOT}" is replaced, so forms like "${CLAUDE_PLUGIN_ROOT:-.}"
+ * fall back to their default and point at the user's project instead.
+ */
+export function mcpConfigCheck(root: string): DoctorCheck {
+  const name = "mcp server config";
+  const file = path.join(root, ".mcp.json");
+  let servers: Record<string, { command?: string; args?: string[] }>;
+  try {
+    servers = JSON.parse(readFileSync(file, "utf8")).mcpServers ?? {};
+  } catch (err) {
+    return { name, level: "fail", detail: `${file}: ${(err as Error).message}`, fix: "reinstall the plugin" };
+  }
+  for (const [id, srv] of Object.entries(servers)) {
+    const args = (srv.args ?? []).map((a) => a.split("${CLAUDE_PLUGIN_ROOT}").join(root));
+    const bad = args.find((a) => a.includes("${CLAUDE_PLUGIN_ROOT"));
+    if (bad) return { name, level: "fail", detail: `${id}: "${bad}" is not resolved by Claude Code for plugins`, fix: 'use the exact "${CLAUDE_PLUGIN_ROOT}" placeholder in .mcp.json' };
+    const entry = args.find((a) => /\.(m?js)$/.test(a));
+    if (entry && !existsSync(entry)) return { name, level: "fail", detail: `${id}: ${entry} not found`, fix: "reinstall the plugin" };
+  }
+  return { name, level: "ok", detail: `${Object.keys(servers).join(", ") || "no servers"} resolve inside ${root}` };
 }
 
 function providerCheck(st: ProviderStatus): DoctorCheck {
@@ -89,6 +116,8 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   const files = loaded.sources.filter((s) => s.loaded).map((s) => s.path);
   checks.push({ name: "config", level: "ok", detail: files.length ? `valid (${files.join(", ")})` : "valid (defaults only)" });
   const { config } = loaded;
+
+  checks.push(mcpConfigCheck(opts.pluginRoot ?? pluginRoot()));
 
   const agy = config.providers.antigravity;
   if (agy.enabled && (agy.usePty ?? true)) {

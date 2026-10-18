@@ -2,9 +2,9 @@
   "mcpServers": {
     "multi-provider": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT:-.}/server/bootstrap.mjs", "mcp"],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs", "mcp"],
       "env": {
-        "MP_PROJECT_DIR": "${CLAUDE_PROJECT_DIR:-}"
+        "MP_PROJECT_DIR": "${CLAUDE_PROJECT_DIR}"
       }
     }
   }

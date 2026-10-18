@@ -46,7 +46,7 @@ claude plugin test .              # tests del conductor header (tests/*.test.tsx
 claude --plugin-dir .             # probar el plugin sin instalarlo
 ```
 
-Al abrir el repo como **proyecto**, Claude Code también lee el `.mcp.json` de la raíz y te pide aprobar el servidor `multi-provider`. Al aprobarlo, se ejecuta la copia de trabajo (`${CLAUDE_PLUGIN_ROOT:-.}` usa `.` cuando no corre como plugin), lo que sirve para probarlo mientras lo desarrollas. Los hooks, comandos y agentes **solo** se cargan cuando se instala como plugin o con `--plugin-dir .`.
+Usa siempre `--plugin-dir .` para probar la copia de trabajo. El `.mcp.json` de la raíz es el del plugin y usa `${CLAUDE_PLUGIN_ROOT}` **exacto**: Claude Code solo sustituye esa forma literal al cargar plugins, así que variantes como `${CLAUDE_PLUGIN_ROOT:-.}` caen al valor por defecto y buscan `server/bootstrap.mjs` en el proyecto del usuario (el servidor MCP no arranca). Si abres el repo como proyecto, rechaza (o deshabilita con `disabledMcpjsonServers`) el servidor `multi-provider` del `.mcp.json`; `/mp-doctor` lo comprueba en la línea `mcp server config`.
 
 ## Configuración
 

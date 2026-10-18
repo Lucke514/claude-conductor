@@ -1,7 +1,8 @@
+import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { formatDoctor, runDoctor, type DoctorReport } from "../src/doctor.js";
+import { formatDoctor, mcpConfigCheck, runDoctor, type DoctorReport } from "../src/doctor.js";
 import { StateStore } from "../src/state.js";
 import { FAKE_AGY, FAKE_CODEX, tmpDir } from "./helpers.js";
 
@@ -82,5 +83,28 @@ describe("resolveCommand", () => {
   it("runs a .js/.mjs entry point with the current node", async () => {
     const { resolveCommand } = await import("../src/process.js");
     expect(resolveCommand(FAKE_CODEX)).toEqual({ command: process.execPath, prefixArgs: [FAKE_CODEX], resolvedPath: FAKE_CODEX });
+  });
+});
+
+describe("mcp server config", () => {
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+
+  it("the shipped .mcp.json resolves to the plugin's own bootstrap", () => {
+    expect(mcpConfigCheck(repoRoot)).toMatchObject({ level: "ok" });
+  });
+
+  it("flags placeholders Claude Code does not expand for plugins", () => {
+    const dir = tmpDir("mp-doctor-plugin-");
+    writeFileSync(
+      path.join(dir, ".mcp.json"),
+      JSON.stringify({ mcpServers: { "multi-provider": { command: "node", args: ["${CLAUDE_PLUGIN_ROOT:-.}/server/bootstrap.mjs", "mcp"] } } }),
+    );
+    expect(mcpConfigCheck(dir)).toMatchObject({ level: "fail" });
+  });
+
+  it("flags a missing server entry point", () => {
+    const dir = tmpDir("mp-doctor-plugin-");
+    writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { mp: { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs"] } } }));
+    expect(mcpConfigCheck(dir)).toMatchObject({ level: "fail", detail: expect.stringContaining("not found") });
   });
 });
