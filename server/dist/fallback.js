@@ -54,7 +54,16 @@ export function resolveOrder(chain, first, fallback = true) {
 export async function runChain(order, deps) {
     const attempts = [];
     const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    const cancelled = (provider, result) => ({
+        status: "cancelled",
+        ...(provider ? { provider } : {}),
+        ...(result ? { result } : {}),
+        attempts,
+        summary: "delegation cancelled: no further provider was tried",
+    });
     for (const entry of order) {
+        if (deps.signal?.aborted)
+            return cancelled();
         if (entry === "claude") {
             return { status: "fallback_to_claude", attempts, summary: summarize(attempts) };
         }
@@ -81,6 +90,11 @@ export async function runChain(order, deps) {
                 return { status: "success", provider: entry, result, attempts };
             }
             const type = result.error?.type ?? "NON_ZERO_EXIT";
+            // A cancellation is never the provider's fault: no breaker, no retry, no next provider.
+            if (type === "CANCELLED" || deps.signal?.aborted) {
+                attempts.push({ provider: entry, errorType: "CANCELLED", error: "cancelled", durationMs: result.durationMs });
+                return cancelled(entry, result);
+            }
             deps.breaker.onFailure(entry);
             attempts.push({
                 provider: entry,

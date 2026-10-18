@@ -40,8 +40,8 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 
 ## T2 — Cancelación en la cadena, `delegate` y las herramientas
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C1 · **Implements**: R6, E3
 - **Files**: `server/src/providers/types.ts`, `server/src/providers/codex.ts`, `server/src/providers/antigravity.ts`, `server/src/fallback.ts`, `server/src/delegate.ts`, `server/src/sdd/task-delegation.ts`, `server/src/index.ts`, `server/tests/delegate.spec.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/fixtures/fake-codex.mjs`
 - **Do**:
@@ -59,12 +59,12 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
   - en `sdd_task_delegate`, el Owner queda intacto y `nextSteps` nombra `sdd_task_release`;
   - los tests existentes siguen pasando.
 - **Verify**: `npm --prefix server test -- delegate sdd-task-delegation`
-- **Notes**: —
+- **Notes**: Hecha por Claude. `CANCELLED` en `ERROR_TYPES`; `ProviderRequest.signal` y `onProgress` llegan a `runProcess` desde los dos adapters. `runChain` (`ChainDeps.signal`) corta con `status: "cancelled"` sin llamar al breaker ni probar otro proveedor. `delegate()` (`ctx.signal`) conserva el worktree con cambios y tiene `nextSteps` propios. `sdd_task_delegate` cancelado no libera el Owner, no corre el Verify y nombra `sdd_task_release`. `index.ts` pasa `extra.signal`. `fake-codex` tiene `hang-write` (y `FAKE_PID_FILE`). Tests: 2 en `delegate.spec.ts` y 1 en `sdd-task-delegation.spec.ts`. Gates: typecheck 0 errores, 244 passed, plugin validate ok, plugin test 11 pass. Clean-code: none · close calls: `onAttempt` todavía guarda `CANCELLED` en `lastError` — lo separa T3 (`lastNotice`)
 
 ## T3 — Fallos atribuibles y salud honesta
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C2 · **Implements**: R7
 - **Files**: `server/src/providers/types.ts`, `server/src/fallback.ts`, `server/src/delegate.ts`, `server/src/state.ts`, `hooks/conductor/model.ts`, `types/index.d.ts`, `statusline/index.js`, `server/tests/fallback.spec.ts`, `server/tests/card-model.spec.ts`, `server/tests/statusline.spec.ts`
 - **Do**:

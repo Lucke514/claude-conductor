@@ -29,7 +29,7 @@ export interface DelegateParams {
   sdd?: { slug: string; taskId: string };
 }
 
-export type DelegateStatus = "success" | "fallback_to_claude" | "failed";
+export type DelegateStatus = "success" | "fallback_to_claude" | "failed" | "cancelled";
 
 export interface DelegateResponse {
   id: string;
@@ -80,6 +80,8 @@ export interface DelegateContext {
   instanceId: string;
   adapters?: Record<ProviderName, ProviderAdapter>;
   sleep?: (ms: number) => Promise<void>;
+  /** The MCP request's cancellation: kills the worker and stops the chain. */
+  signal?: AbortSignal;
 }
 
 export async function delegate(params: DelegateParams, ctx: DelegateContext): Promise<DelegateResponse> {
@@ -148,6 +150,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
         timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
         ...(model ? { model } : {}),
         env: workerEnv(meta),
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
       });
     } catch (err) {
       result = { ok: false, output: "", exitCode: null, durationMs: 0, error: { type: "NON_ZERO_EXIT", message: (err as Error).message } };
@@ -177,7 +180,9 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
           });
         }
       }
-      if (mode === "write" && result.ok && changes.files.length > 0) {
+      // A cancelled write keeps what the worker already did (E3), like a finished one.
+      const keep = result.ok || result.error?.type === "CANCELLED";
+      if (mode === "write" && keep && changes.files.length > 0) {
         kept = { meta, changes };
       } else {
         await removeWorktree(meta).catch(() => undefined);
@@ -193,6 +198,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     config,
     execute,
     ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
     onAttempt: async (provider, result) => {
       await ctx.store.update((s) => {
         recordCall(s, {
@@ -236,7 +242,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
       ...r,
     };
     if (routing) response.routing = { rule: routing.rule, provider: routing.provider };
-    if (kept && r.status === "success") {
+    if (kept && (r.status === "success" || r.status === "cancelled")) {
       response.diff = kept.changes.diff;
       response.diffTruncated = kept.changes.truncated;
       response.filesChanged = kept.changes.files;
@@ -296,6 +302,14 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
 }
 
 function nextSteps(r: DelegateResponse): string[] {
+  if (r.status === "cancelled") {
+    return r.worktreePath
+      ? [
+          `Cancelled. The worker's changes so far stay in ${r.worktreePath} (see \`diff\`).`,
+          "Keep them: `delegation_apply` with the worktreePath, then finish the task yourself. Drop them: `delegation_discard`.",
+        ]
+      : ["Cancelled before the worker changed anything. No other provider was tried."];
+  }
   if (r.status === "fallback_to_claude") {
     return ["No worker could complete the task. Do it yourself (Claude); see `summary` for why each provider failed."];
   }

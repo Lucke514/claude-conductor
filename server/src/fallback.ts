@@ -63,7 +63,7 @@ export interface Attempt {
   durationMs?: number;
 }
 
-export type ChainStatus = "success" | "fallback_to_claude" | "failed";
+export type ChainStatus = "success" | "fallback_to_claude" | "failed" | "cancelled";
 
 export interface ChainOutcome {
   status: ChainStatus;
@@ -86,6 +86,8 @@ export interface ChainDeps {
   execute: (provider: ProviderName, adapter: ProviderAdapter) => Promise<ProviderResult>;
   /** Called after every attempt (for metrics / state.json). */
   onAttempt?: (provider: ProviderName, result: ProviderResult) => Promise<void> | void;
+  /** Once aborted, no further attempt starts and the outcome is `cancelled`. */
+  signal?: AbortSignal;
 }
 
 const NO_RETRY: ErrorType[] = ["AUTH", "NOT_INSTALLED", "QUOTA"];
@@ -109,7 +111,16 @@ export async function runChain(order: ChainEntry[], deps: ChainDeps): Promise<Ch
   const attempts: Attempt[] = [];
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
+  const cancelled = (provider?: ProviderName, result?: ProviderResult): ChainOutcome => ({
+    status: "cancelled",
+    ...(provider ? { provider } : {}),
+    ...(result ? { result } : {}),
+    attempts,
+    summary: "delegation cancelled: no further provider was tried",
+  });
+
   for (const entry of order) {
+    if (deps.signal?.aborted) return cancelled();
     if (entry === "claude") {
       return { status: "fallback_to_claude", attempts, summary: summarize(attempts) };
     }
@@ -137,6 +148,11 @@ export async function runChain(order: ChainEntry[], deps: ChainDeps): Promise<Ch
         return { status: "success", provider: entry, result, attempts };
       }
       const type = result.error?.type ?? "NON_ZERO_EXIT";
+      // A cancellation is never the provider's fault: no breaker, no retry, no next provider.
+      if (type === "CANCELLED" || deps.signal?.aborted) {
+        attempts.push({ provider: entry, errorType: "CANCELLED", error: "cancelled", durationMs: result.durationMs });
+        return cancelled(entry, result);
+      }
       deps.breaker.onFailure(entry);
       attempts.push({
         provider: entry,

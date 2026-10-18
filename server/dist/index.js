@@ -49,11 +49,11 @@ export function createServer() {
             fallback: z.boolean().optional().describe("Fall back through the chain on failure (default true)"),
             sessionId: z.string().optional().describe("Injected by the plugin hook; do not set manually"),
         },
-    }, async (args) => {
+    }, async (args, extra) => {
         try {
             const dir = projectDir();
             const { config } = await loadConfig(dir);
-            return json(await delegate(args, { projectDir: dir, config, store, instanceId }));
+            return json(await delegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal }));
         }
         catch (err) {
             return fail(err);
@@ -163,11 +163,11 @@ export function createServer() {
             timeoutMs: z.number().int().positive().optional(),
             sessionId: z.string().optional().describe("Injected by the plugin hook; do not set manually"),
         },
-    }, async (args) => {
+    }, async (args, extra) => {
         try {
             const dir = projectDir();
             const { config } = await loadConfig(dir);
-            return json(await sddTaskDelegate(args, { projectDir: dir, config, store, instanceId }));
+            return json(await sddTaskDelegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal }));
         }
         catch (err) {
             return fail(err);

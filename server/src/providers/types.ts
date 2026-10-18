@@ -7,6 +7,8 @@ export const ERROR_TYPES = [
   "NON_ZERO_EXIT",
   "EMPTY_OUTPUT",
   "PARSE_ERROR",
+  /** The delegation was cancelled (MCP cancellation or delegation_cancel): never the provider's fault. */
+  "CANCELLED",
 ] as const;
 
 export type ErrorType = (typeof ERROR_TYPES)[number];
@@ -26,6 +28,10 @@ export interface ProviderRequest {
   model?: string;
   /** Extra environment for the child (e.g. GIT_CONFIG_* to force worktree hooks); `undefined` removes a variable. */
   env?: Record<string, string | undefined>;
+  /** Aborting kills the worker's process tree. */
+  signal?: AbortSignal;
+  /** The worker's output as it arrives (progress, idle detection). */
+  onProgress?: (chunk: string) => void;
 }
 
 export interface TokenUsage {

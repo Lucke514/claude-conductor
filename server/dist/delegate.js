@@ -79,6 +79,7 @@ export async function delegate(params, ctx) {
                 timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
                 ...(model ? { model } : {}),
                 env: workerEnv(meta),
+                ...(ctx.signal ? { signal: ctx.signal } : {}),
             });
         }
         catch (err) {
@@ -110,7 +111,9 @@ export async function delegate(params, ctx) {
                     });
                 }
             }
-            if (mode === "write" && result.ok && changes.files.length > 0) {
+            // A cancelled write keeps what the worker already did (E3), like a finished one.
+            const keep = result.ok || result.error?.type === "CANCELLED";
+            if (mode === "write" && keep && changes.files.length > 0) {
                 kept = { meta, changes };
             }
             else {
@@ -127,6 +130,7 @@ export async function delegate(params, ctx) {
         config,
         execute,
         ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
         onAttempt: async (provider, result) => {
             await ctx.store.update((s) => {
                 recordCall(s, {
@@ -167,7 +171,7 @@ export async function delegate(params, ctx) {
         };
         if (routing)
             response.routing = { rule: routing.rule, provider: routing.provider };
-        if (kept && r.status === "success") {
+        if (kept && (r.status === "success" || r.status === "cancelled")) {
             response.diff = kept.changes.diff;
             response.diffTruncated = kept.changes.truncated;
             response.filesChanged = kept.changes.files;
@@ -225,6 +229,14 @@ export async function delegate(params, ctx) {
     }
 }
 function nextSteps(r) {
+    if (r.status === "cancelled") {
+        return r.worktreePath
+            ? [
+                `Cancelled. The worker's changes so far stay in ${r.worktreePath} (see \`diff\`).`,
+                "Keep them: `delegation_apply` with the worktreePath, then finish the task yourself. Drop them: `delegation_discard`.",
+            ]
+            : ["Cancelled before the worker changed anything. No other provider was tried."];
+    }
     if (r.status === "fallback_to_claude") {
         return ["No worker could complete the task. Do it yourself (Claude); see `summary` for why each provider failed."];
     }

@@ -124,10 +124,13 @@ export class CodexAdapter implements ProviderAdapter {
       timeoutMs: req.timeoutMs,
       env: { NO_COLOR: "1", ...req.env },
       usePty: this.cfg.usePty ?? false,
+      ...(req.signal ? { signal: req.signal } : {}),
+      ...(req.onProgress ? { onOutput: req.onProgress } : {}),
     });
     const model = req.model ?? this.cfg.model;
     const base = { exitCode: r.exitCode, durationMs: r.durationMs, notes: r.notes, ...(model ? { model } : {}) };
     const parsed = parseCodexJsonl(r.stdout);
+    if (r.cancelled) return { ...base, ok: false, output: parsed.finalMessage, error: { type: "CANCELLED", message: "delegation cancelled" } };
     const diagnostic = [r.stderr, ...parsed.errors].join("\n");
 
     const clean = r.exitCode === 0 && !r.timedOut && parsed.finalMessage.trim() !== "";

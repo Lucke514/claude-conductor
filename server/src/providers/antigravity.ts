@@ -112,10 +112,13 @@ export class AntigravityAdapter implements ProviderAdapter {
         timeoutMs: req.timeoutMs,
         env: { NO_COLOR: "1", ...req.env },
         usePty: this.cfg.usePty ?? true,
+        ...(req.signal ? { signal: req.signal } : {}),
+        ...(req.onProgress ? { onOutput: req.onProgress } : {}),
       });
       notes.push(...r.notes);
       const model = req.model ?? this.cfg.model;
       const base = { exitCode: r.exitCode, durationMs: r.durationMs, notes, ...(model ? { model } : {}) };
+      if (r.cancelled) return { ...base, ok: false, output: r.stdout.trim(), error: { type: "CANCELLED", message: "delegation cancelled" } };
       // Under a PTY stderr is merged into stdout.
       const combined = [r.stdout, r.stderr].filter(Boolean).join("\n");
 

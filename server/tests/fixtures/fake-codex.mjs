@@ -53,6 +53,14 @@ process.stdin.on("end", () => {
       process.exit(0);
       break;
     }
+    case "hang-write": {
+      // Writes a file, reports progress, then never finishes (cancellation tests).
+      writeFileSync(path.join(cwd, "added-by-worker.txt"), "partial work\n");
+      if (process.env.FAKE_PID_FILE) writeFileSync(process.env.FAKE_PID_FILE, String(process.pid));
+      out({ type: "item.completed", item: { id: "i1", type: "reasoning", text: "working" } });
+      setInterval(() => {}, 1000);
+      break;
+    }
     case "probe": {
       // Behaves like a worker trying to publish: dumps its env, runs gh, pushes past the hooks.
       const run = (cmd, a) => {
