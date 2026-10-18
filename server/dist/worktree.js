@@ -68,6 +68,7 @@ export async function createWorktree(opts) {
         createdAt: new Date().toISOString(),
         hooksDir,
         symlinks,
+        ...(opts.sdd ? { sdd: opts.sdd } : {}),
     };
     await fs.writeFile(path.join(gitDir, META_FILE), JSON.stringify(meta, null, 2));
     return meta;
@@ -210,13 +211,9 @@ export async function applyWorktree(worktreePath, id) {
     await removeWorktree(meta);
     return { applied: true, files: changes.files, output, ...(changes.patchFile ? { patchFile: changes.patchFile } : {}) };
 }
-/** Remove every mp/* worktree of a repository (optionally only older than maxAgeMs). */
-export async function cleanupWorktrees(cwd, maxAgeMs = 0) {
-    const repoRoot = await repoRootOf(cwd);
-    if (!repoRoot)
-        return [];
+/** The repo's mp/* worktrees under the plugin's directory, as `git worktree list` has them. */
+async function managedWorktrees(repoRoot) {
     const list = (await git(["worktree", "list", "--porcelain"], repoRoot)).stdout;
-    const removed = [];
     let current = {};
     const blocks = [];
     for (const line of list.split(/\r?\n/)) {
@@ -231,15 +228,38 @@ export async function cleanupWorktrees(cwd, maxAgeMs = 0) {
     }
     if (current.path)
         blocks.push(current);
-    for (const b of blocks) {
+    return blocks.filter((b) => {
         if (!b.path || !b.branch?.startsWith("mp/"))
-            continue;
+            return false;
         try {
             assertManagedPath(b.path);
+            return true;
         }
         catch {
-            continue;
+            return false;
         }
+    });
+}
+/** Metadata of every live mp/* worktree of the repository (unreadable ones are skipped). */
+export async function listWorktrees(cwd) {
+    const repoRoot = await repoRootOf(cwd);
+    if (!repoRoot)
+        return [];
+    const metas = [];
+    for (const b of await managedWorktrees(repoRoot)) {
+        const meta = await readMeta(b.path).catch(() => undefined);
+        if (meta)
+            metas.push(meta);
+    }
+    return metas;
+}
+/** Remove every mp/* worktree of a repository (optionally only older than maxAgeMs). */
+export async function cleanupWorktrees(cwd, maxAgeMs = 0) {
+    const repoRoot = await repoRootOf(cwd);
+    if (!repoRoot)
+        return [];
+    const removed = [];
+    for (const b of await managedWorktrees(repoRoot)) {
         if (maxAgeMs > 0) {
             const st = await fs.stat(b.path).catch(() => undefined);
             if (st && Date.now() - st.mtimeMs < maxAgeMs)

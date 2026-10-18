@@ -2,10 +2,13 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { statePath } from "../paths.js";
 import type { RecentDelegation } from "../state.js";
+import { listWorktrees } from "../worktree.js";
 import { parseScope, parseStatus, parseTasks, parseVerificationReports, readFeatureArtifacts, SddError } from "./artifacts.js";
 import type { ScopeRow, VerificationReport } from "./artifacts.js";
 
 export type PipelineDelegation = Partial<RecentDelegation>;
+/** A task with a live mp/* worktree: in progress or awaiting review, never orphaned. */
+export type LiveTask = { slug: string; taskId: string };
 export type Stage = "Spec" | "Plan" | "Tasks" | "Implementación" | "Verificación" | "Cerrada" | "Descartada" | "Desconocida";
 export interface FeatureStatus {
   slug: string;
@@ -51,7 +54,7 @@ async function delegations(recent?: readonly PipelineDelegation[]): Promise<read
   } catch { return undefined; }
 }
 
-async function calculate(projectDir: string, slug: string, scope: ScopeRow[], recent: readonly PipelineDelegation[] | undefined): Promise<FeatureStatus> {
+async function calculate(projectDir: string, slug: string, scope: ScopeRow[], recent: readonly PipelineDelegation[] | undefined, live: readonly LiveTask[]): Promise<FeatureStatus> {
   const artifacts = await readFeatureArtifacts(projectDir, slug);
   const result: FeatureStatus = {
     slug, depth: artifacts.depth, statuses: { spec: null }, stage: "Desconocida",
@@ -112,7 +115,8 @@ async function calculate(projectDir: string, slug: string, scope: ScopeRow[], re
   if (status === "implemented" && result.tasks.open + result.tasks.blocked > 0) result.warnings.push({ code: "closed_with_open_tasks", detail: "Spec implemented con tareas abiertas o bloqueadas." });
   const relevant = recent?.filter((r) => r.sdd?.slug === slug && tasks.some((t) => t.id === r.sdd?.taskId));
   for (const task of tasks) {
-    if (task.box === "open" && task.owner && /^(codex|agy|antigravity)\b/i.test(task.owner) && relevant && !relevant.some((r) => r.sdd?.taskId === task.id)) {
+    if (task.box === "open" && task.owner && /^(codex|agy|antigravity)\b/i.test(task.owner) && relevant && !relevant.some((r) => r.sdd?.taskId === task.id) &&
+        !live.some((l) => l.slug === slug && l.taskId === task.id)) {
       result.warnings.push({ code: "orphan_claim", taskId: task.id, detail: `${task.id}: ${task.owner}` });
     }
   }
@@ -130,18 +134,58 @@ async function calculate(projectDir: string, slug: string, scope: ScopeRow[], re
   return result;
 }
 
-export async function featureStatus(projectDir: string, slug: string, recent?: readonly PipelineDelegation[]): Promise<FeatureStatus> {
+export async function featureStatus(projectDir: string, slug: string, recent?: readonly PipelineDelegation[], live: readonly LiveTask[] = []): Promise<FeatureStatus> {
   // Reuse the artifact reader's slug validation before any slug-specific path access.
   await readFeatureArtifacts(projectDir, slug);
   const { slugs, scope } = await inventory(projectDir);
   if (!slugs.includes(slug)) throw new SddError("FEATURE_NOT_FOUND", `feature '${slug}' not found. Available features: ${slugs.join(", ") || "none"}`);
-  return calculate(projectDir, slug, scope, await delegations(recent));
+  return calculate(projectDir, slug, scope, await delegations(recent), live);
 }
 
-export async function listFeatureStatus(projectDir: string, recent?: readonly PipelineDelegation[]): Promise<FeatureStatus[]> {
+export async function listFeatureStatus(projectDir: string, recent?: readonly PipelineDelegation[], live: readonly LiveTask[] = []): Promise<FeatureStatus[]> {
   const { slugs, scope } = await inventory(projectDir);
   const rows = await delegations(recent);
   const rank = (slug: string) => Math.min(...scope.filter((r) => r.slug === slug).map((r) => r.rank), Infinity);
   slugs.sort((a, b) => (rank(a) - rank(b)) || (a < b ? -1 : a > b ? 1 : 0));
-  return Promise.all(slugs.map((slug) => calculate(projectDir, slug, scope, rows)));
+  return Promise.all(slugs.map((slug) => calculate(projectDir, slug, scope, rows, live)));
+}
+
+export interface FeatureSummary {
+  slug: string;
+  stage: Stage;
+  substage?: string;
+  /** Closed tasks ([x], [~], [>]) over the total. */
+  closed: number;
+  total: number;
+  /** The claimed open task, else the next free one. */
+  current?: { id: string; owner: string | null };
+  warnings: number;
+  nextStep: string;
+}
+
+function summarize(f: FeatureStatus): FeatureSummary {
+  const claimed = f.tasks.openList.find((t) => t.owner !== null);
+  const current = claimed ?? f.tasks.openList[0];
+  return {
+    slug: f.slug,
+    stage: f.stage,
+    ...(f.substage ? { substage: f.substage } : {}),
+    closed: f.tasks.done + f.tasks.waived + f.tasks.deferred,
+    total: f.tasks.total,
+    ...(current ? { current } : {}),
+    warnings: f.warnings.length,
+    nextStep: f.nextStep,
+  };
+}
+
+/** The sdd_feature_status tool: one feature in full, or a summary of every feature (R6). */
+export async function sddFeatureStatus(
+  args: { slug?: string },
+  ctx: { projectDir: string },
+): Promise<FeatureStatus | { features: FeatureSummary[]; notes: string[] }> {
+  const live = (await listWorktrees(ctx.projectDir).catch(() => [])).flatMap((m) => (m.sdd ? [m.sdd] : []));
+  if (args.slug) return featureStatus(ctx.projectDir, args.slug, undefined, live);
+  const all = await listFeatureStatus(ctx.projectDir, undefined, live);
+  const notes = all.length ? [...new Set(all.flatMap((f) => f.notes))] : ["no SDD features"];
+  return { features: all.map(summarize), notes };
 }

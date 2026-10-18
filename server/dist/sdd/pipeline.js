@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { statePath } from "../paths.js";
+import { listWorktrees } from "../worktree.js";
 import { parseScope, parseStatus, parseTasks, parseVerificationReports, readFeatureArtifacts, SddError } from "./artifacts.js";
 async function exists(file) {
     try {
@@ -48,7 +49,7 @@ async function delegations(recent) {
         return undefined;
     }
 }
-async function calculate(projectDir, slug, scope, recent) {
+async function calculate(projectDir, slug, scope, recent, live) {
     const artifacts = await readFeatureArtifacts(projectDir, slug);
     const result = {
         slug, depth: artifacts.depth, statuses: { spec: null }, stage: "Desconocida",
@@ -117,7 +118,8 @@ async function calculate(projectDir, slug, scope, recent) {
         result.warnings.push({ code: "closed_with_open_tasks", detail: "Spec implemented con tareas abiertas o bloqueadas." });
     const relevant = recent?.filter((r) => r.sdd?.slug === slug && tasks.some((t) => t.id === r.sdd?.taskId));
     for (const task of tasks) {
-        if (task.box === "open" && task.owner && /^(codex|agy|antigravity)\b/i.test(task.owner) && relevant && !relevant.some((r) => r.sdd?.taskId === task.id)) {
+        if (task.box === "open" && task.owner && /^(codex|agy|antigravity)\b/i.test(task.owner) && relevant && !relevant.some((r) => r.sdd?.taskId === task.id) &&
+            !live.some((l) => l.slug === slug && l.taskId === task.id)) {
             result.warnings.push({ code: "orphan_claim", taskId: task.id, detail: `${task.id}: ${task.owner}` });
         }
     }
@@ -135,19 +137,42 @@ async function calculate(projectDir, slug, scope, recent) {
     }
     return result;
 }
-export async function featureStatus(projectDir, slug, recent) {
+export async function featureStatus(projectDir, slug, recent, live = []) {
     // Reuse the artifact reader's slug validation before any slug-specific path access.
     await readFeatureArtifacts(projectDir, slug);
     const { slugs, scope } = await inventory(projectDir);
     if (!slugs.includes(slug))
         throw new SddError("FEATURE_NOT_FOUND", `feature '${slug}' not found. Available features: ${slugs.join(", ") || "none"}`);
-    return calculate(projectDir, slug, scope, await delegations(recent));
+    return calculate(projectDir, slug, scope, await delegations(recent), live);
 }
-export async function listFeatureStatus(projectDir, recent) {
+export async function listFeatureStatus(projectDir, recent, live = []) {
     const { slugs, scope } = await inventory(projectDir);
     const rows = await delegations(recent);
     const rank = (slug) => Math.min(...scope.filter((r) => r.slug === slug).map((r) => r.rank), Infinity);
     slugs.sort((a, b) => (rank(a) - rank(b)) || (a < b ? -1 : a > b ? 1 : 0));
-    return Promise.all(slugs.map((slug) => calculate(projectDir, slug, scope, rows)));
+    return Promise.all(slugs.map((slug) => calculate(projectDir, slug, scope, rows, live)));
+}
+function summarize(f) {
+    const claimed = f.tasks.openList.find((t) => t.owner !== null);
+    const current = claimed ?? f.tasks.openList[0];
+    return {
+        slug: f.slug,
+        stage: f.stage,
+        ...(f.substage ? { substage: f.substage } : {}),
+        closed: f.tasks.done + f.tasks.waived + f.tasks.deferred,
+        total: f.tasks.total,
+        ...(current ? { current } : {}),
+        warnings: f.warnings.length,
+        nextStep: f.nextStep,
+    };
+}
+/** The sdd_feature_status tool: one feature in full, or a summary of every feature (R6). */
+export async function sddFeatureStatus(args, ctx) {
+    const live = (await listWorktrees(ctx.projectDir).catch(() => [])).flatMap((m) => (m.sdd ? [m.sdd] : []));
+    if (args.slug)
+        return featureStatus(ctx.projectDir, args.slug, undefined, live);
+    const all = await listFeatureStatus(ctx.projectDir, undefined, live);
+    const notes = all.length ? [...new Set(all.flatMap((f) => f.notes))] : ["no SDD features"];
+    return { features: all.map(summarize), notes };
 }
 //# sourceMappingURL=pipeline.js.map

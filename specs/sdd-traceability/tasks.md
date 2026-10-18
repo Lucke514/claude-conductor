@@ -96,8 +96,8 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 
 ## T5 — Herramienta `sdd_feature_status` y `/sdd-status`
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C3 · **Implements**: R6, E3, E9
 - **Files**: `server/src/index.ts`, `commands/sdd-status.md`, `server/tests/sdd-pipeline.spec.ts`
 - **Do**:
@@ -109,7 +109,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
   - 50 fixtures se resuelven en < 1000 ms (E9);
   - `claude plugin validate .` acepta el comando.
 - **Verify**: `npm --prefix server test -- sdd-pipeline` · `claude plugin validate .`
-- **Notes**: —
+- **Notes**: Hecha por Claude en la sesión principal. `sddFeatureStatus` en `server/src/sdd/pipeline.ts`, que devuelve el estado completo con `slug` o un `FeatureSummary` por feature (etapa, `closed/total`, tarea actual con owner, número de avisos, siguiente paso). Registrada como `sdd_feature_status` en `server/src/index.ts`; `commands/sdd-status.md` dibuja el pipeline sin ejecutar nada. G1 resuelto: `WorktreeMeta.sdd` (lo escribe `delegate()` vía `createWorktree`) y `listWorktrees` en `server/src/worktree.ts`, que comparte el parseo con `cleanupWorktrees`; una tarea con worktree vivo no es `orphan_claim`. Contra este repo: SC1 se cumple. Gates: typecheck 0 errores, 232 passed (230 + 2), plugin validate ok, plugin test 9 pass. Clean-code: el parseo de `git worktree list` pasó de `cleanupWorktrees` a `managedWorktrees` para no duplicarlo · close calls: `worktree.ts` y `delegate.ts` no están en los `Files` de T5 — es el arreglo de G1, documentado ahí
 
 ## T6 — Líneas SDD en la card
 
@@ -152,7 +152,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 
 ## Gaps found in verification
 
-- **G1** — `orphan_claim` marca como huérfana una tarea cuya delegación sigue en curso, porque `state.json` solo registra una delegación al terminar (visto con T3 corriendo). Se corrige en T5: la herramienta considera también los worktrees `mp/*` vivos de esa tarea.
+- **G1** (resuelto en T5) — `orphan_claim` marca como huérfana una tarea cuya delegación sigue en curso, porque `state.json` solo registra una delegación al terminar (visto con T3 corriendo). Se corrige en T5: la herramienta considera también los worktrees `mp/*` vivos de esa tarea.
 - **G2** — `server/tests/statusline.spec.ts` ("shows not installed / no auth in red") falla cuando el entorno tiene `NO_COLOR`, porque `statusline/index.js` decide el color al cargar el módulo. Hace que el gate Tests de cada delegación salga "NEW FAILURE". Fuera del alcance de esta feature: el test debe fijar `NO_COLOR` antes de importar.
 - **G3** — El brief de `sdd_task_delegate` muestra `Do: —` cuando el `**Do**` de la tarea es una lista con viñetas en las líneas siguientes (visto con T3): `parseTasks` en `server/src/sdd/artifacts.ts` solo lee el texto de la misma línea. Fuera del alcance de esta feature (`sdd-task-delegation`).
 

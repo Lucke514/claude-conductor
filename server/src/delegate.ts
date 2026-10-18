@@ -135,6 +135,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
         provider,
         includeUncommitted: config.isolation.includeUncommitted,
         symlink: config.isolation.symlink,
+        ...(params.sdd ? { sdd: params.sdd } : {}),
       });
     }
     const model = provider === params.provider ? params.model : undefined;

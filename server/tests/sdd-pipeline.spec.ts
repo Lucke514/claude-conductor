@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { featureStatus, listFeatureStatus } from "../src/sdd/pipeline.js";
+import { featureStatus, listFeatureStatus, sddFeatureStatus } from "../src/sdd/pipeline.js";
 import { tmpDir } from "./helpers.js";
 import { DELEGATION_REPORT, PLAN, SPEC, TASKS, writeFeature } from "./sdd-fixtures.js";
 
@@ -125,5 +125,29 @@ describe("sdd pipeline", () => {
     expect(rows).toHaveLength(50);
     expect(rows.slice(0, 3).map((r) => r.slug)).toEqual(["f48", "f49", "f00"]);
     expect(performance.now() - start).toBeLessThan(1000);
+  });
+
+  it("G1: a live worktree for the task means it is in progress, not orphaned", async () => {
+    const root = tmpDir();
+    demo(root);
+    expect((await featureStatus(root, "demo", [], [{ slug: "demo", taskId: "T4" }])).warnings.map((w) => w.code)).not.toContain("orphan_claim");
+    expect((await featureStatus(root, "demo", [], [{ slug: "other", taskId: "T4" }])).warnings.map((w) => w.code)).toContain("orphan_claim");
+  });
+
+  it("R6/E3: the tool lists a summary per feature; without specs/ it says so", async () => {
+    const root = tmpDir();
+    vi.stubEnv("MP_HOME", root);
+    writeFileSync(path.join(root, "state.json"), JSON.stringify({ version: 1, recent: [] }));
+    expect(await sddFeatureStatus({}, { projectDir: root })).toEqual({ features: [], notes: ["no SDD features"] });
+    const nine = TASKS + ["T5", "T6", "T7", "T8"].map((id) => `\n## ${id} — Extra\n\n- [x] Done\n- **Owner**: —\n`).join("");
+    writeFeature(root, "a", { "spec.md": SPEC, "plan.md": PLAN, "tasks.md": nine });
+    writeFeature(root, "b", { "spec.md": SPEC.replace("approved", "implemented"), "plan.md": PLAN, "tasks.md": closed });
+    const r = await sddFeatureStatus({}, { projectDir: root });
+    expect("features" in r && r.features.map((f) => [f.slug, f.stage, `${f.closed}/${f.total}`])).toEqual([
+      ["a", "Implementación", "5/9"],
+      ["b", "Cerrada", "5/5"],
+    ]);
+    expect("features" in r && r.features[0]!.current).toEqual({ id: "T4", owner: "codex (multi-provider) since 2026-10-18" });
+    expect(await sddFeatureStatus({ slug: "b" }, { projectDir: root })).toMatchObject({ slug: "b", stage: "Cerrada" });
   });
 });
