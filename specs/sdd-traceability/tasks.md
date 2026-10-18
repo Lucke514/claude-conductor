@@ -136,8 +136,8 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 
 ## T7 — Document the feature
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C6 · **Implements**: all (documentation)
 - **Files**: `docs/sdd-traceability.md`, `README.md`, `skills/multi-provider/SKILL.md`
 - **Do**:
@@ -146,7 +146,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
   - En el skill: consultar `sdd_feature_status` antes de `/sdd-delegate`.
 - **Acceptance**: La doc describe el comportamiento real; cada ejemplo coincide con el esquema registrado en `index.ts`.
 - **Verify**: comparar cada ejemplo con `server/src/index.ts` y ejecutar `/sdd-status` en este repo (SC1)
-- **Notes**: —
+- **Notes**: Hecha por Claude en la sesión principal. `docs/sdd-traceability.md` (uso, interfaz de `/sdd-status` y `sdd_feature_status`, tabla de etapas y de avisos, campo `sdd`, card, notas y señal). En el README: `/sdd-status` en Uso, sección "Pipeline SDD", fila de la herramienta, sesión y spec-driven de la card, `pipeline.ts` en Estructura. En `skills/multi-provider/SKILL.md`, consultar `sdd_feature_status` antes de elegir tarea. Los ejemplos se cotejaron con el esquema de `server/src/index.ts`. SC1 se ejecutó con `server/dist` contra este repo, porque el servidor de esta sesión es el 0.1.1 de la caché y aún no tiene la herramienta. Clean-code: none · close calls: none
 
 ---
 
