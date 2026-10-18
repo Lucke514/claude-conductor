@@ -76,14 +76,14 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 
 ## T7 — Slash command `/sdd-delegate`
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C6 · **Implements**: R10
 - **Files**: `commands/sdd-delegate.md`, `skills/multi-provider/SKILL.md`
 - **Do**: Escribir el comando con el flujo claim → commit (sin trailers) → delegate → presentación → apply + commit `sdd-task-delegation: T# …` tras el OK del usuario, o discard + release + commit del handback; defaults `auto` y write, `--read` opcional. Mencionar el flujo en la skill.
 - **Acceptance**: El comando documenta los cuatro argumentos y los dos desenlaces; `claude plugin validate .` lo acepta.
 - **Verify**: `claude plugin validate .`
-- **Notes**: —
+- **Notes**: `commands/sdd-delegate.md` (argumentos, defaults auto/write, flujo claim → commit → delegate → apply o discard + release) y sección "Spec-driven tasks" en `skills/multi-provider/SKILL.md`; commit `sdd-task-delegation: T7 /sdd-delegate command`. Gates: plugin validate ok. Clean-code: none · close calls: none
 
 ## T8 — Document the feature
 
