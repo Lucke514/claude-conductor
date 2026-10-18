@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 /**
@@ -102,6 +103,9 @@ export function resolveCommand(bin: string): ResolvedCommand | undefined {
     // Unknown batch file: run through cmd.exe with escaped arguments (no interpolation).
     return { command: process.env.ComSpec ?? "cmd.exe", prefixArgs: ["/d", "/s", "/c", found], resolvedPath: found };
   }
+  // A plain JS entry point (e.g. binaryPath pointing at a CLI's .js file): run it with
+  // the current node, since Windows cannot spawn a script through its shebang.
+  if (/\.(c|m)?js$/i.test(found)) return { command: process.execPath, prefixArgs: [found], resolvedPath: found };
   return { command: found, prefixArgs: [], resolvedPath: found };
 }
 
@@ -190,17 +194,40 @@ class TailBuffer {
 }
 
 type PtyModule = typeof import("node-pty");
+
+/**
+ * node-pty 1.x ships its macOS `spawn-helper` prebuild without the exec bit, so every
+ * PTY spawn fails ("posix_spawnp failed") until it is chmod'ed. Best effort, no-op elsewhere.
+ */
+function ensureSpawnHelperExecutable(): void {
+  if (process.platform !== "darwin") return;
+  try {
+    const root = path.dirname(createRequire(import.meta.url).resolve("node-pty/package.json"));
+    for (const dir of [`prebuilds/darwin-${process.arch}`, "build/Release"]) {
+      const helper = path.join(root, dir, "spawn-helper");
+      if (existsSync(helper) && (statSync(helper).mode & 0o111) === 0) chmodSync(helper, 0o755);
+    }
+  } catch {
+    /* not installed or read-only: loadPty reports the failure through its fallback note */
+  }
+}
 let ptyModule: PtyModule | null | undefined;
 
 async function loadPty(): Promise<PtyModule | null> {
   if (ptyModule !== undefined) return ptyModule;
   try {
+    ensureSpawnHelperExecutable();
     const mod = (await import("node-pty")) as Partial<PtyModule> & { default?: PtyModule };
     ptyModule = typeof mod.spawn === "function" ? (mod as PtyModule) : (mod.default ?? null);
   } catch {
     ptyModule = null;
   }
   return ptyModule;
+}
+
+/** True when node-pty can be loaded (Antigravity needs it to avoid hanging without a TTY). */
+export async function ptyAvailable(): Promise<boolean> {
+  return (await loadPty()) !== null;
 }
 
 export async function runProcess(opts: RunOptions): Promise<RunResult> {

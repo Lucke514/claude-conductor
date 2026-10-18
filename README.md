@@ -115,7 +115,14 @@ Comandos del plugin (también accesibles como `/multi-provider:<comando>`):
 /mp-setup [user|project]
 /mp-statusline full|compact|off
 /mp-auto on|off|status
+/mp-doctor [--no-live]
 ```
+
+### Diagnóstico (`/mp-doctor`)
+
+`/mp-doctor` hace una comprobación end-to-end en tu máquina: versión de Node y de git, validez de la config, si `node-pty` carga, binario, versión y auth de cada CLI y, por último, una **ejecución real** de una línea ("reply OK") en modo read con el mismo adapter que usa `delegate`. Esa ejecución corre en un repo git temporal, nunca en tu proyecto, y gasta unos pocos tokens por proveedor; `--no-live` la omite. Cada fallo trae su `fix:` concreto. Es la forma rápida de detectar que una versión nueva de `codex` o `agy` cambió sus flags (lo verás como `PARSE_ERROR` o `NON_ZERO_EXIT` en la ejecución real aunque `/providers-status` salga bien).
+
+Desde la terminal: `node server/bootstrap.mjs cli doctor [--no-live] [--json]` (código de salida 0 si todo pasa y 3 si algo falla).
 
 ### Delegación automática
 
@@ -242,6 +249,7 @@ Instalación: el formato actual de plugins **no** permite declarar `statusLine` 
 | **Auth expirada** | `errorType: "AUTH"` y el proveedor se salta sin reintentos. En Codex: `codex login`. En agy: ejecuta `agy` en modo interactivo y vuelve a iniciar sesión. En Linux sin keyring, `failed to retrieve token: secret keyring is locked` exige desbloquear el keyring o usar `AGY_ADC_AUTH=true`. Revisa con `/providers-status`. |
 | **Binario no encontrado** | `NOT_INSTALLED`. Configura `providers.<p>.binaryPath` con la ruta absoluta. En Windows se resuelven los shims `.cmd` de npm ejecutando su JS con `node`, sin shell. |
 | **Circuito abierto** | Se abrió tras N fallos seguidos. Espera el cooldown (visible en la status line y en `/providers-status`) o borra la entrada `breaker` del proveedor en `state.json`. |
+| **Algo falla y no sabes qué** | Ejecuta `/mp-doctor`: recorre entorno, config, auth y una llamada real a cada CLI, y propone el arreglo de cada fallo. |
 | **El MCP no arranca tras instalar** | La primera ejecución instala dependencias; mira el stderr del servidor en `/mcp`. Manualmente: `cd <ruta del plugin>/server && npm install --omit=dev`. |
 | **agy en write mode no cambia nada** | El modo headless deniega herramientas que requieren aprobación. Valora `writeModeArgs: ["--dangerously-skip-permissions"]`: corre aislado en un worktree. |
 | **Lint/tests fallan en el worktree por falta de dependencias** | Añade `isolation.symlink: ["node_modules"]` o un comando de instalación en `verify.commands`. |
@@ -256,9 +264,17 @@ Instalación: el formato actual de plugins **no** permite declarar `statusLine` 
   - `agy` puede recibir prompts muy largos por un archivo temporal dentro del worktree (que se borra al terminar), por el límite de unos 32 KB de la línea de comandos;
   - los hooks git usan el `sh` de Git for Windows;
   - el kill del árbol usa `taskkill /T /F`;
-  - los tests están escritos para POSIX (binarios fake con shebang).
+  - un `binaryPath` que apunta a un `.js`/`.mjs` se ejecuta con `node` (Windows no respeta el shebang); los binarios fake de los tests funcionan así en las tres plataformas.
 - El hook Bash limpia patrones conocidos en el texto del comando. Construcciones de shell exóticas (cuerpos generados por variables) pueden escaparse, y por eso existe además el hook `commit-msg` y el setting `attribution`.
 - Las verificaciones automáticas (`verify.commands`) corren sin shell: no admiten pipes ni `&&`. Usa un script de npm.
+
+## CI
+
+`.github/workflows/ci.yml` corre en cada push a `main` y en cada PR:
+
+- typecheck y Vitest en Linux, macOS y Windows, con Node 20 y 22;
+- comprobación de que `server/dist` está al día con `src` (se versiona porque el plugin se instala sin build);
+- `claude plugin validate .` y `claude plugin test .` (los tests de la conductor card).
 
 ## Estructura
 
@@ -266,9 +282,9 @@ Instalación: el formato actual de plugins **no** permite declarar `statusLine` 
 .claude-plugin/{plugin.json,marketplace.json}   .mcp.json   hooks/hooks.json
 agents/{codex-worker,agy-worker}.md   commands/*.md   skills/multi-provider/SKILL.md
 hooks/conductor/{card.tsx,model.ts}   types/index.d.ts   tests/conductor-card.test.tsx
-config/multiprovider.example.json     statusline/index.js
+config/multiprovider.example.json     statusline/index.js   .github/workflows/ci.yml
 server/  bootstrap.mjs · src/{index,cli,config,delegate,fallback,circuit-breaker,health,worktree,
-         prompt-builder,process,state,audit,hooks,setup,sanitize,gh-scrub}.ts · providers/{types,codex,antigravity}.ts
+         prompt-builder,process,state,audit,hooks,setup,sanitize,gh-scrub,doctor}.ts · providers/{types,codex,antigravity}.ts
          tests/ (vitest *.spec.ts + binarios fake) · dist/ (compilado, versionado)
 ```
 

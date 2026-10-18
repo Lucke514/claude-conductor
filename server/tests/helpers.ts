@@ -22,6 +22,8 @@ export function makeRepo(): string {
   g("config", "user.name", "Test User");
   g("config", "user.email", "test@example.com");
   g("config", "commit.gpgsign", "false");
+  // Windows runners default to core.autocrlf=true; keep checkouts byte-identical.
+  g("config", "core.autocrlf", "false");
   writeFileSync(path.join(dir, "README.md"), "# repo\n");
   writeFileSync(path.join(dir, "index.ts"), "export const a = 1;\n");
   g("add", "-A");

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { delegate } from "../src/delegate.js";
@@ -182,8 +182,10 @@ describe("delegate (integration with fake CLIs)", () => {
     process.env.FAKE_MODE = "write";
     const r = await delegate({ provider: "codex", task: "x", mode: "write" }, ctx(repo));
     expect(existsSync(r.worktreePath!)).toBe(true);
+    // git lists canonical paths (macOS /private/var, Windows long names with "/").
+    const real = realpathSync.native(r.worktreePath!);
     const removed = await cleanupWorktrees(repo);
-    expect(removed).toContain(r.worktreePath);
+    expect(removed.map((p) => path.resolve(p))).toContain(path.resolve(real));
     expect(git(repo, "branch", "--list", "mp/*")).toBe("");
   });
 
