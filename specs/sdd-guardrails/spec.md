@@ -85,6 +85,7 @@ Hoy el bloqueo de commits y pushes depende de hooks que un worker puede saltarse
 - 2026-10-18 R6: la comprobación del remoto está activada por defecto, con `guardrails.checkRemotePush: false` para apagarla — el coste (≤ 10 s por delegación) compensa no enterarse de un push.
 - 2026-10-18 R4: se acepta `GIT_ALLOW_PROTOCOL=file` aunque impida al worker `git fetch` o dependencias desde git — porque el worktree ya tiene lo necesario y es lo único que corta también el push por ssh con claves sin agente.
 - 2026-10-18 Spec aprobado por el usuario con las opciones por defecto de las cuatro preguntas abiertas.
+- 2026-10-18 Plan aprobado por el usuario.
 
 ## Open questions
 
