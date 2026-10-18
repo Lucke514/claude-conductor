@@ -159,3 +159,40 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 ---
 
 ## Verification reports
+
+### Verification report — sdd-traceability — 2026-10-18 — pass 1
+
+Change set: `main@648bc57...HEAD` (`feature/sdd-traceability`)
+Converged: yes — R7 (tarea en vivo durante un `sdd_task_delegate` real) y SC3 (comparación con `/usage`) quedan como comprobación manual en la máquina del usuario con `claude --plugin-dir .`
+
+| Req | Verdict | Evidence (case · assertion · clause) |
+|---|---|---|
+| R1 | met | `sdd-pipeline.spec.ts::"R1/R8/E10/E11…"` — Status por artefacto, conteos por casilla, openList con owners, último reporte con veredictos; runner: `17 passed` |
+| R2 | met | `sdd-pipeline.spec.ts::"R2/R3: stage precedence case %#"` (10 casos) y `"R2/E8…"`; contra este repo, `sdd-task-delegation` → `Verificación · pass 1 no convergido` |
+| R3 | met | mismos 10 casos verifican `nextStep`; `pending` del reporte llega al siguiente paso (`"…converger (awaiting the user's decision on R10/SC1"`) |
+| R4 | met | `sdd-pipeline.spec.ts::"R4/E7…"` cubre `violations`, `scope_mismatch`, `orphan_claim`, `closed_with_open_tasks`, `ready_to_close`; `"G1…"` cubre el worktree vivo |
+| R5 | met | `delegate.spec.ts::"R5: normal delegate does not record sdd…"` y `sdd-task-delegation.spec.ts::"R5: sdd_task_delegate records sdd…"` — audit y `recent[0]` con `{ slug, taskId }`, sin `sdd` en `delegate` normal |
+| R6 | met | `sdd-pipeline.spec.ts::"R6/E3: the tool lists a summary per feature…"`; `sdd_feature_status` en `server/src/index.ts`; `commands/sdd-status.md` pasa `claude plugin validate .` |
+| R7 | partially met | `card-model.spec.ts::"R7: at most 3 features…"` y `"R7: a long line shortens the slug…"`; `conductor-card.test.tsx::"SDD lines from the server pipeline"`. La tarea en vivo vía el hook de `sdd_task_delegate` no se ejercita en el harness (no atiende `$.tool.call` de una herramienta MCP) |
+| R8 | met | `sdd-pipeline.spec.ts::"R1/R8…"` — `specs/` idéntico antes y después, dos llamadas con el mismo JSON |
+| R9 | met | `card-model.spec.ts::"R9: labels, bar, percent and time to reset"`, `"R9: warn from 80%, error from 95%"`; `conductor-card.test.tsx::"Claude Code usage…"` en panel y bandas |
+| E1 | met | `"E1/E2/E4…"` — `Available features: bad, demo, draft, unreadable` |
+| E2 | met | `"E1/E2/E4…"` — `Desconocida` + `malformed` nombrando el archivo, las demás se calculan |
+| E3 | met | `"R6/E3…"` — `no SDD features`; `card-model.spec.ts::"E3…"` sin líneas |
+| E4 | met | `"E1/E2/E4…"` y `"lists by scope rank…"` — `scope-only` no aparece y ordena |
+| E5 | met | `"E5: Small skips Plan/Tasks…"` |
+| E6 | met | `"E6: absent/corrupt state…"`; `conductor-card.test.tsx::"SDD line falls back to tasks.md…"` |
+| E7 | met | `"R4/E7…"` — T99 ignorada |
+| E8 | met | `"R2/E8…"` y `sdd-artifacts.spec.ts::"A4/E8…"` |
+| E9 | met | `"lists by scope rank then name… 50 features"` — < 1000 ms |
+| E10 | met | `sdd-artifacts.spec.ts::"E10…"`; owners con ñ y acentos en `"E5…"` |
+| E11 | met | `"R1/R8/E10/E11…"` y `"R4/E7…"` — sin cuerpos de tareas, rutas ni detalles de violaciones |
+| E12 | met | `card-model.spec.ts::"E12…"`; `conductor-card.test.tsx::"usage — when no window has a reading yet"` |
+| E13 | met | `card-model.spec.ts::"E13…"` — `gasto ▮▮▮▮▮▮ 112%`, sin `resetsAt` |
+| E14 | partially met | el código pone las ventanas en línea propia cuando la card es angosta; el test comprueba el texto en los tres sitios pero no la estructura de línea |
+
+Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 18 passed (18) · Tests 236 passed (236)` (baseline 200 passed (200); +36 nuevos, 0 omitidos) · `claude plugin validate .` ✅ · `claude plugin test .` ✅ `11 pass, 0 fail` (baseline 7) · Dist ✅ `git diff --exit-code -- server/dist` vacío tras el build · CI multiplataforma: pendiente (sin PR; merge local)
+Dead-code sweep: `tsc --noUnusedLocals --noUnusedParameters` sin hallazgos
+Success criteria: SC1 met — `sddFeatureStatus` sobre este repo da `sdd-guardrails` Cerrada y `sdd-task-delegation` `Verificación · pass 1 no convergido` con la decisión R10/SC1 en el siguiente paso · SC2 met on emission (R5) · SC3 pending — manual
+Attribution: none
+Shortcuts declared: none
