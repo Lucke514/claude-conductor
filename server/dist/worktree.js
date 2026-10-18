@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, promises as fs } from "node:fs";
+import { existsSync, promises as fs, realpathSync } from "node:fs";
 import path from "node:path";
 import { git, gitOk, repoRootOf } from "./git.js";
 import { patchesDir, worktreesDir } from "./paths.js";
@@ -89,10 +89,22 @@ export async function readMeta(worktreePath) {
     const raw = await fs.readFile(path.join(gitDir, META_FILE), "utf8");
     return JSON.parse(raw);
 }
+/**
+ * Canonical form for comparing paths: resolves symlinks (macOS lists /var as /private/var)
+ * and Windows 8.3 short names (RUNNER~1 vs runneradmin) the way `git worktree list` prints them.
+ */
+function realOrResolved(p) {
+    try {
+        return realpathSync.native(p);
+    }
+    catch {
+        return path.resolve(p);
+    }
+}
 /** Only worktrees created by this plugin may be applied/removed. */
 export function assertManagedPath(p) {
-    const root = path.resolve(worktreesDir());
-    const rel = path.relative(root, path.resolve(p));
+    const root = realOrResolved(worktreesDir());
+    const rel = path.relative(root, realOrResolved(p));
     if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
         throw new Error(`refusing to operate on a worktree outside ${root}`);
     }
