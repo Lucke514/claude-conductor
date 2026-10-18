@@ -1,8 +1,19 @@
-// Contract of the values the conductor card keeps in $.state (self-contained:
+// Contract of the values the conductor header keeps in $.state (self-contained:
 // mirrors the shapes in hooks/conductor/model.ts).
 
 export type Running = { provider: string; mode: string; task: string; startedAt: number }
 export type SessionTally = { calls: number; tokens: number }
+export type SessionMeta = { model?: string; ctxPercent?: number; costUsd?: number; repo?: string; branch?: string }
+export type Cleaned = { at: number; rows: number }
+
+export type SpecTask = { id: string; title: string; box: string; owner: string }
+export type SpecProgress = {
+  slug: string
+  status: string
+  done: number
+  total: number
+  current?: SpecTask & { state: 'en curso' | 'siguiente' }
+}
 
 export type ProviderStateFile = {
   health?: { installed?: boolean; enabled?: boolean; auth?: string; version?: string }
@@ -41,11 +52,13 @@ declare module 'claude-code' {
     'multi-provider': {
       snap: StateFile | null
       enabled: boolean
-      expanded: boolean
       running: Running | null
       tick: number
       verdicts: Record<string, string>
       session: SessionTally
+      meta: SessionMeta
+      spec: SpecProgress | null
+      cleaned: Cleaned | null
     }
   }
 }
