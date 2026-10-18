@@ -2,7 +2,7 @@
 
 # Spec: Delegación de tareas SDD
 
-> Status: in-review
+> Status: approved
 > Owner: Lucas Gonzalez Espinosa (@Lucke514)
 > Sign-off: — the session's user holds all of these
 > Tracking: — this project tracks work in the repo only
@@ -75,6 +75,7 @@ Permitir que Claude delegue a Codex o Antigravity **una tarea concreta** (`T#` o
 - 2026-10-18 R5 exige también `plan.md` en `Status: approved` cuando existe (features Standard) — porque las tareas se derivan del plan aprobado.
 - 2026-10-18 `/sdd-delegate` usa `auto` como proveedor por defecto (R10) — reutiliza el routing y la cadena de fallback actuales.
 - 2026-10-18 El modo por defecto es write (R10); `--read` queda para investigación — porque una tarea de `tasks.md` es trabajo de implementación.
+- 2026-10-18 Spec aprobado por el usuario.
 
 ## Open questions
 
