@@ -3,7 +3,7 @@
 # Tasks: Guardrails de delegación
 
 > Spec: [spec.md](./spec.md) · Plan: [plan.md](./plan.md)
-> Status: in-review
+> Status: approved
 > Last updated: 2026-10-18
 
 Una tarea = una sesión. Hecha significa:
