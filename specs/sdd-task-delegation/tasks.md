@@ -43,14 +43,14 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 
 ## T4 [P] — Verificación de la tarea
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C4 · **Implements**: R7, E3, E9
 - **Files**: `server/src/sdd/verify.ts`, `server/tests/sdd-verify.spec.ts`
 - **Do**: Implementar `verifyTask(worktreePath, task, gates, timeoutMs)`: detección de sintaxis de shell → `manual` sin ejecutar; `splitCommand` + `runProcess` sin shell; gates `pipeline-only` → `manual`; `newFailure` según la baseline (true solo si registra 0 fallos, `"compare"` si registra preexistentes); no borra el worktree.
 - **Acceptance**: Un Verify que pasa y otro que falla se informan con extracto de salida; `node -e "process.exit(1)"` con baseline de 0 fallos → `newFailure: true`; `npm test && rm -rf x` queda `manual` y el archivo `x` sigue existiendo; el worktree existe tras un fallo.
 - **Verify**: `npm --prefix server test -- sdd-verify`
-- **Notes**: —
+- **Notes**: `server/src/sdd/verify.ts` (`verifyTask`, `shellSyntax`, `baselineIsClean`) y `server/tests/sdd-verify.spec.ts` (4 casos); commit `sdd-task-delegation: T4 task verification`. Gates: typecheck 0 errores, 172 passed. Clean-code: none · close calls: `$` y backticks dentro de comillas dobles cuentan como shell (se expanden) — se queda, E3 pide no ejecutar nada que dependa de una shell
 
 ## T5 — Herramientas MCP `sdd_task_*`
 
