@@ -34,6 +34,9 @@ Claude Code is always the **orchestrator and supervisor**. Workers (Codex via `c
 
 1. Read the response: `status`, `attempts`, `violations`, `notes`.
    - `fallback_to_claude` → do the task yourself; `summary` explains why each worker failed.
+   - `partial` → the worker ran out of time after changing files: review its `diff` like any other, then apply it and finish the rest, delegate the remainder, or discard. Never re-delegate the whole task blindly — that is what used to throw the work away.
+   - `cancelled` → it was stopped on purpose; keep or drop what is in `worktreePath`. Do not start another provider for the same task without asking.
+   - Long delegations run in the background: `delegation_status` shows progress and changed files, `delegation_cancel` stops one.
 2. **Verify every claim** against the real code (Read/Grep). Never accept unverified output.
 3. With a diff: review it fully; lint/tests run automatically in the worktree when `verify.commands` is configured (PostToolUse hook) — read that report, and run them yourself otherwise.
 4. Decide:

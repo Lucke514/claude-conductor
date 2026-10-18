@@ -18,6 +18,8 @@ Call `delegate` with:
 ## 2. Interpret the response
 
 - `status: "fallback_to_claude"` or `"failed"` → report it with the `summary`/`attempts`; do not retry in a loop.
+- `status: "partial"` → the worker ran out of time after changing files; verify the partial `diff` and report what is done and what is missing (VERDICT: REQUEST_CHANGES unless it is complete). `"cancelled"` → report it; never re-delegate.
+- `errorType` `STALLED`, `PERMISSION_BLOCKED` or `CANCELLED` are not the provider failing: relay the `fix` in the error message.
 - `violations` present (worker committed, or wrote in read mode) → mention it prominently and be extra strict.
 - `notes` → relay anything relevant (e.g. PTY fallback).
 

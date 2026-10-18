@@ -20,6 +20,8 @@ Antigravity has no sandbox flag equivalent to Codex's: in read mode it still run
 ## 2. Interpret the response
 
 - `status: "fallback_to_claude"` or `"failed"` → report it with the `summary`/`attempts`; do not retry in a loop.
+- `status: "partial"` → the worker ran out of time after changing files; verify the partial `diff` and report what is done and what is missing (VERDICT: REQUEST_CHANGES unless it is complete). `"cancelled"` → report it; never re-delegate.
+- `errorType` `STALLED`, `PERMISSION_BLOCKED` or `CANCELLED` are not the provider failing: relay the `fix` in the error message.
 - `violations` present → mention it prominently and be extra strict.
 - `notes` such as "node-pty unavailable; fell back to plain spawn" → relay them (they explain hangs/timeouts).
 - agy output is terminal text with ANSI stripped; ignore leftover progress noise.

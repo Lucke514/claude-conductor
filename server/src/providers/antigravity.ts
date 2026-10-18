@@ -188,7 +188,6 @@ export class AntigravityAdapter implements ProviderAdapter {
   }
 
   async run(req: ProviderRequest): Promise<ProviderResult> {
-    const patterns = effectiveErrorPatterns("antigravity", this.cfg);
     // Very long prompts don't fit in argv: hand them over through a file in the worktree.
     let prompt = req.prompt;
     let promptFile: string | undefined;

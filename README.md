@@ -65,7 +65,9 @@ Ejemplo completo: [`config/multiprovider.example.json`](config/multiprovider.exa
 | `chain` | `["codex","antigravity","claude"]` | Cadena de fallback. `claude` = devolver `fallback_to_claude` para que Claude haga la tarea. |
 | `routing` | `{}` | Para `provider:"auto"`. `{"review":"codex"}` o `{"refactor":{"provider":"antigravity","keywords":["refactor","refactoriza"]}}`. Coincide por inicio de palabra; si nada coincide, se usa el primero disponible de la cadena. |
 | `defaults.mode` | `"read"` | `read` o `write` |
-| `defaults.timeoutMs` | `600000` | Timeout duro por intento |
+| `defaults.timeoutMs` | `600000` | Timeout duro por intento (modo read) |
+| `defaults.writeTimeoutMs` | `1800000` | Timeout duro por intento en modo write; un worker que avanza no se corta antes |
+| `defaults.idleTimeoutMs` | `120000` | Sin salida durante este tiempo, el intento termina como `STALLED` |
 | `defaults.maxFileBytes` / `maxTotalBytes` | `65536` / `524288` | Límite de contenido de archivos en el prompt |
 | `defaults.maxDiffBytes` | `204800` | El diff devuelto se trunca; el patch completo queda en `~/.claude/multi-provider/patches/` |
 | `circuitBreaker.threshold` / `cooldownMs` | `3` / `300000` | Fallos consecutivos para abrir el circuito / duración del cooldown |
@@ -78,7 +80,7 @@ Ejemplo completo: [`config/multiprovider.example.json`](config/multiprovider.exa
 | `statusline.mode` | `"compact"` | `full` / `compact` / `off` |
 | `guardrails.checkRemotePush` | `true` | Tras cada delegación, busca la rama `mp/*` en los remotos (`git ls-remote`, 10 s) y la marca como `worker_push` si un worker la publicó |
 | `card.enabled` / `card.placement` | `true` / `"side"` | Conductor header; `side` = panel al lado de la conversación, `below` = banda sobre el prompt (`/conductor lado\|abajo`) |
-| `providers.<codex\|antigravity>` | | `enabled`, `binaryPath`, `model`, `extraArgs`, `usePty`, `errorPatterns`, `timeoutMs`, `modelFlag`, `readModeArgs`, `writeModeArgs`, `versionArgs`, `authCheckArgs`, `skipGitRepoCheck` (codex), `outputFormat` (agy: `text`/`json`) |
+| `providers.<codex\|antigravity>` | | `enabled`, `binaryPath`, `model`, `extraArgs`, `usePty`, `errorPatterns`, `timeoutMs`, `modelFlag`, `readModeArgs`, `writeModeArgs`, `versionArgs`, `authCheckArgs`, `skipGitRepoCheck` y `transport` (codex: `app-server` por defecto, o `exec`), `outputFormat` (agy: `stream-json` por defecto, `text`, `json`) |
 
 `errorPatterns` acepta expresiones regulares (sin distinguir mayúsculas) por tipo de error: `AUTH`, `QUOTA`, `RATE_LIMIT`. Si defines un tipo, tus patrones **reemplazan** a los incluidos para ese tipo.
 
@@ -100,8 +102,8 @@ Configurable por incertidumbre:
 | `versionArgs` de agy (por defecto `--version`) | Solo está documentado por terceros |
 | `authCheckArgs` de agy (vacío por defecto → auth `unknown`) | agy no tiene un comando documentado de estado de auth |
 | `modelFlag` | El flag del modelo puede cambiar entre versiones |
-| `writeModeArgs` de agy (vacío por defecto) | Sin `--dangerously-skip-permissions`, el modo headless puede denegar ediciones en silencio. El ejemplo lo incluye porque corre aislado en un worktree, pero es **decisión tuya** activarlo. |
-| `outputFormat` de agy | `text` por defecto, como pide la especificación |
+| `writeModeArgs` de agy (`["--dangerously-skip-permissions"]` por defecto) | El modo headless no puede responder pedidos de permiso. Corre aislado en un worktree desechable y sin credenciales de git/GitHub. `[]` lo desactiva; `["--mode", "auto"]` es la alternativa más conservadora |
+| `outputFormat` de agy | `stream-json` por defecto (sin PTY): da progreso, detección de stalls y de pedidos de permiso. `text` vuelve al modo anterior (con PTY) |
 | `errorPatterns` | Los mensajes de error de ambos CLIs no son un contrato estable |
 
 ## Uso
@@ -164,12 +166,14 @@ Herramientas MCP (servidor `multi-provider`):
 | `delegation_apply` | `git apply --3way` del worktree sobre tu rama (sin commit) y limpieza |
 | `delegation_discard` | Borra el worktree y la rama `mp/*` |
 | `delegation_cleanup` | Limpia worktrees `mp/*` huérfanos |
+| `delegation_status` | `{ id? }` → solo lectura: delegaciones en curso con proveedor, fase, tiempo, últimas líneas de progreso y archivos cambiados; también las `lost` |
+| `delegation_cancel` | `{ id }` → mata el worker, no prueba otro proveedor ni toca el breaker; la delegación vuelve `cancelled` con lo que ya hizo |
 | `sdd_task_claim` | `{ slug, task: "T#"\|"G#"\|"next", provider? }` → escribe el `**Owner**` y devuelve el comando `commit` del claim |
 | `sdd_task_delegate` | `{ slug, task, mode?: "write"\|"read", timeoutMs? }` → la respuesta de `delegate` más `sdd: { acceptance, verification, verified, notesDraft, handback? }` |
 | `sdd_task_release` | `{ slug, task }` → `**Owner**` a `—` y el comando `commit` del handback |
 | `sdd_feature_status` | `{ slug? }` → solo lectura: sin slug, `{ features: [{ slug, stage, substage?, closed, total, current?, warnings, nextStep }], notes }`; con slug, el estado completo de la feature |
 
-Los valores de `status` son `success`, `fallback_to_claude` y `failed` (este último solo si la cadena no termina en `claude`).
+Los valores de `status` son `success`, `fallback_to_claude`, `failed` (solo si la cadena no termina en `claude`), `partial` (un write se quedó sin tiempo después de cambiar archivos: trae el diff y no se reintenta) y `cancelled`. Detalle en [`docs/provider-reliability.md`](docs/provider-reliability.md).
 
 ## Modelo de supervisión
 
@@ -320,7 +324,9 @@ Instalación: el formato actual de plugins **no** permite declarar `statusLine` 
 | **Circuito abierto** | Se abrió tras N fallos seguidos. Espera el cooldown (visible en la status line y en `/providers-status`) o borra la entrada `breaker` del proveedor en `state.json`. |
 | **Algo falla y no sabes qué** | Ejecuta `/mp-doctor`: recorre entorno, config, auth y una llamada real a cada CLI, y propone el arreglo de cada fallo. |
 | **El MCP no arranca tras instalar** | La primera ejecución instala dependencias; mira el stderr del servidor en `/mcp`. Manualmente: `cd <ruta del plugin>/server && npm install --omit=dev`. |
-| **agy en write mode no cambia nada** | El modo headless deniega herramientas que requieren aprobación. Valora `writeModeArgs: ["--dangerously-skip-permissions"]`: corre aislado en un worktree. |
+| **`PERMISSION_BLOCKED`** | agy esperó una aprobación que un run headless no puede dar. El default de write ya la evita (`--dangerously-skip-permissions`); si lo cambiaste, vuelve a ponerlo o usa `["--mode", "auto"]`. No cuenta para el breaker. |
+| **`STALLED`** | El worker no imprimió nada durante `defaults.idleTimeoutMs`. Si había cambiado archivos, el resultado es `partial` con su diff. Sube `idleTimeoutMs` si tus tareas tienen pasos largos y silenciosos. |
+| **Codex usa `exec` y no `app-server`** | `/mp-doctor` lo muestra en `codex: transport`. Actualiza codex o fija `providers.codex.transport: "exec"`. |
 | **Lint/tests fallan en el worktree por falta de dependencias** | Añade `isolation.symlink: ["node_modules"]` o un comando de instalación en `verify.commands`. |
 
 ## Limitaciones conocidas

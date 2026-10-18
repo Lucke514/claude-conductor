@@ -193,8 +193,8 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 
 ## T9 — Document the feature
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C7 · **Implements**: all (documentation)
 - **Files**: `docs/provider-reliability.md`, `README.md`, `skills/multi-provider/SKILL.md`, `agents/codex-worker.md`, `agents/agy-worker.md`
 - **Do**:
@@ -203,7 +203,7 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
   - En el skill y los agentes: cómo tratar `partial` y `cancelled`.
 - **Acceptance**: La doc describe el comportamiento real y cada ejemplo coincide con los esquemas de `index.ts` y `config.ts`.
 - **Verify**: comparar cada ejemplo con `server/src/index.ts` y `server/src/config.ts`
-- **Notes**: —
+- **Notes**: Hecha por Claude. `docs/provider-reliability.md` (estados `partial`/`cancelled`, errores nuevos y si cuentan para el breaker, config nueva con cómo volver atrás, checks de `/mp-doctor`, notas sobre agy y los permisos, `app-server`, progreso sin contenido y trabajos perdidos). En el README: filas de config `writeTimeoutMs`/`idleTimeoutMs`/`transport`/`outputFormat`, `writeModeArgs` de agy con la alternativa `--mode auto`, herramientas `delegation_status`/`delegation_cancel`, valores de `status` y troubleshooting de `PERMISSION_BLOCKED`, `STALLED` y transporte. El skill y los dos agentes explican `partial`/`cancelled` y los errores no atribuibles. Los ejemplos se cotejaron con `server/src/index.ts` y `server/src/config.ts`. Clean-code: se quitó un `patterns` muerto de `AntigravityAdapter.run` que quedó al partir el método · close calls: none
 
 ---
 
