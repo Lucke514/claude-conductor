@@ -2,18 +2,19 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { loadConfig } from "./config.js";
 import { checkHealth } from "./health.js";
-import { postDelegate, preBash, preDelegate, sessionStart, type HookInput } from "./hooks.js";
+import { postDelegate, preBash, preDelegate, sessionStart, userPromptSubmit, type HookInput } from "./hooks.js";
 import { stripAttribution } from "./sanitize.js";
-import { applySettings, installGitHooks, setStatuslineMode, syncStatuslineScript, uninstallGitHooks, type Scope } from "./setup.js";
+import { applySettings, installGitHooks, setAutoDelegate, setStatuslineMode, syncStatuslineScript, uninstallGitHooks, type Scope } from "./setup.js";
 import { StateStore } from "./state.js";
 
 /**
  * multi-provider CLI, used by plugin hooks and slash commands:
  *
- *   cli.js hook <pre-delegate|pre-bash|post-delegate|session-start>   (JSON on stdin)
+ *   cli.js hook <pre-delegate|pre-bash|post-delegate|session-start|user-prompt-submit>   (JSON on stdin)
  *   cli.js setup [--scope user|project] [--no-attribution] [--no-statusline]
  *                [--statusline-compose|--statusline-replace] [--no-git-hooks]
  *   cli.js statusline-mode <full|compact|off>
+ *   cli.js auto-delegate <on|off|status>
  *   cli.js git-hooks <install|uninstall>
  *   cli.js clean-commit-msg <file>
  *   cli.js status
@@ -31,6 +32,7 @@ const HOOKS: Record<string, (i: HookInput) => Promise<Record<string, unknown> | 
   "pre-bash": preBash,
   "post-delegate": postDelegate,
   "session-start": sessionStart,
+  "user-prompt-submit": userPromptSubmit,
 };
 
 function flag(args: string[], name: string): boolean {
@@ -92,6 +94,18 @@ async function main(argv: string[]): Promise<number> {
       process.stdout.write(`statusline mode set to '${mode}' in ${file}\n`);
       return 0;
     }
+    case "auto-delegate": {
+      const arg = rest[0];
+      if (arg === "status") {
+        const { config } = await loadConfig(projectDir());
+        process.stdout.write(`auto-delegation is ${config.autoDelegate.enabled ? "on" : "off"}\n`);
+        return 0;
+      }
+      if (arg !== "on" && arg !== "off") throw new Error("usage: auto-delegate on|off|status");
+      const file = await setAutoDelegate(arg === "on");
+      process.stdout.write(`auto-delegation turned ${arg} in ${file}\n`);
+      return 0;
+    }
     case "git-hooks": {
       const dir = option(rest, "--repo") ?? projectDir();
       const r = rest[0] === "uninstall" ? await uninstallGitHooks(dir) : await installGitHooks(dir);
@@ -112,7 +126,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     default:
-      process.stderr.write("usage: cli.js hook|setup|statusline-mode|git-hooks|clean-commit-msg|status\n");
+      process.stderr.write("usage: cli.js hook|setup|statusline-mode|auto-delegate|git-hooks|clean-commit-msg|status\n");
       return 2;
   }
 }

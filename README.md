@@ -74,6 +74,7 @@ Ejemplo completo: [`config/multiprovider.example.json`](config/multiprovider.exa
 | `isolation.includeUncommitted` | `true` | La base del worktree incluye los cambios *tracked* sin commitear (`git stash create`) |
 | `isolation.symlink` | `[]` | Directorios enlazados en el worktree (ej. `node_modules`, para poder correr lint/tests) |
 | `verify.commands` | `[]` | Ej. `["npm run lint","npm test"]`. Se ejecutan sin shell dentro del worktree (hook PostToolUse) |
+| `autoDelegate.enabled` | `true` | Delegación automática en cada mensaje (`/mp-auto on\|off`) |
 | `statusline.mode` | `"compact"` | `full` / `compact` / `off` |
 | `providers.<codex\|antigravity>` | | `enabled`, `binaryPath`, `model`, `extraArgs`, `usePty`, `errorPatterns`, `timeoutMs`, `modelFlag`, `readModeArgs`, `writeModeArgs`, `versionArgs`, `authCheckArgs`, `skipGitRepoCheck` (codex), `outputFormat` (agy: `text`/`json`) |
 
@@ -113,7 +114,14 @@ Comandos del plugin (también accesibles como `/multi-provider:<comando>`):
 /providers-config
 /mp-setup [user|project]
 /mp-statusline full|compact|off
+/mp-auto on|off|status
 ```
+
+### Delegación automática
+
+Con la delegación automática activada (**por defecto**), no hace falta usar `/delegate`. En cada mensaje, un hook `UserPromptSubmit` le indica a Claude que decida por su cuenta si el pedido conviene delegarlo (revisión, refactor, feature, tests, análisis). Si conviene, Claude arma el brief, llama a `delegate` con `provider: "auto"` y verifica el resultado igual que con `/delegate`. Las conversaciones, las preguntas rápidas, los cambios mínimos y los comandos `/…` no se delegan. El modo `write` sigue pidiendo confirmación, y el diff solo se aplica con tu OK.
+
+`/mp-auto off` la desactiva y `/mp-auto on` la vuelve a activar. El valor se guarda como `autoDelegate.enabled` en `~/.claude/multiprovider.json`.
 
 Subagentes: `codex-worker` y `agy-worker` delegan, verifican y devuelven `VERDICT: ACCEPT | REQUEST_CHANGES | DISCARD`.
 

@@ -18,6 +18,7 @@ export interface HookInput {
   tool_input?: Record<string, unknown>;
   tool_response?: unknown;
   source?: string;
+  prompt?: string;
 }
 
 type HookOutput = Record<string, unknown> | undefined;
@@ -190,6 +191,28 @@ export async function postDelegate(input: HookInput): Promise<HookOutput> {
           : "Do not apply this diff as-is: ask the worker for a fix, fix it yourself in the worktree, or discard it."),
     },
   };
+}
+
+export const AUTO_DELEGATE_CONTEXT =
+  "multi-provider auto-delegation is ON (the user can turn it off with /mp-auto off). " +
+  "Decide yourself whether this request contains a substantive task a worker can do from a self-contained brief " +
+  "(code review, bug hunt, refactor, implementing a feature, writing tests, codebase analysis). " +
+  "If it does, delegate it WITHOUT asking the user to run any command: write a self-contained brief " +
+  "(objective, constraints, acceptance criteria) and call the multi-provider `delegate` tool with provider \"auto\", " +
+  "mode \"write\" when the request asks to change code and \"read\" otherwise, passing the relevant files. " +
+  "Then verify the result against the real code: on fallback_to_claude do the task yourself; in write mode show the diff " +
+  "and verification results and call delegation_apply only after the user's OK; never merge mp/* branches. " +
+  "Tell the user in one line that you are delegating and to which provider. " +
+  "Do NOT delegate conversation, quick questions, tiny edits faster to do directly, plugin/config management, " +
+  "or work that depends on context you cannot put in a brief.";
+
+/** UserPromptSubmit: when autoDelegate is on, tell Claude to delegate suitable requests by itself. */
+export async function userPromptSubmit(input: HookInput): Promise<HookOutput> {
+  const prompt = (input.prompt ?? "").trim();
+  if (!prompt || prompt.startsWith("/")) return undefined;
+  const config = await safeConfig(projectDirFrom(input));
+  if (!config?.autoDelegate.enabled) return undefined;
+  return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: AUTO_DELEGATE_CONTEXT } };
 }
 
 /** SessionStart: silent health check; only speaks when no provider is usable. */

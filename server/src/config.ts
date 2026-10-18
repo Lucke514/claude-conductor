@@ -87,6 +87,12 @@ export const ConfigSchema = z.object({
       compose: z.string().optional(),
     })
     .prefault({}),
+  autoDelegate: z
+    .object({
+      /** Inject a delegation instruction on every user prompt (toggled with /mp-auto). */
+      enabled: z.boolean().default(true),
+    })
+    .prefault({}),
   card: z
     .object({
       /** Conductor card (band above the prompt, Claude Code with plugin UI modules). */
