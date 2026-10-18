@@ -112,7 +112,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 ## T7 — Document the feature
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: — · **Implements**: all (documentation)
 - **Files**: `docs/sdd-guardrails.md`, `README.md`, `skills/multi-provider/SKILL.md`
 - **Do**:
