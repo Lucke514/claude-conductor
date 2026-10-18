@@ -18,8 +18,8 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 
 ## T1 [P] — Lectura tolerante y parsers de reportes y scope
 
-- [ ] Done
-- **Owner**: codex (multi-provider) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C1 · **Implements**: E2, E4, E8, E10
 - **Files**: `server/src/sdd/artifacts.ts`, `server/tests/sdd-artifacts.spec.ts`, `server/tests/sdd-fixtures.ts`
 - **Do**: En `artifacts.ts`, añadir:
@@ -30,7 +30,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
   Solo se interpretan las anclas en inglés (E10).
 - **Acceptance**: Una feature Standard con solo `spec.md` se lee sin error; `loadFeature` sigue lanzando `FEATURE_NOT_FOUND` en ese caso; el reporte de `specs/sdd-task-delegation/tasks.md` (copiado como fixture) da `pass 1`, `converged: false`; sin sección de reportes devuelve `[]` (E8); `parseScope` del `scope.md` real devuelve 6 filas con rank y Status; un spec sin `> Status:` se distingue de `draft` (E2); `sdd-artifacts.spec.ts` existente sigue pasando.
 - **Verify**: `npm --prefix server test -- sdd-artifacts`
-- **Notes**: —
+- **Notes**: Delegada a codex (delegación 20261018045707-be6d62). En `server/src/sdd/artifacts.ts`: `readFeatureArtifacts` (`loadFeature` la usa con el mismo contrato), `parseVerificationReports` y `parseScope`. En `server/tests/sdd-artifacts.spec.ts`, 7 casos con fixtures `DELEGATION_REPORT`/`INTEGRATION_SCOPE` en `sdd-fixtures.ts`. Gates: typecheck 0 errores, 207 passed (200 + 7), plugin validate ok, plugin test 7 pass. La verificación del worker falló solo porque el worktree no tenía `node_modules`; se corrió a mano en el worktree y se añadió `isolation.symlink` al proyecto. Clean-code: el conteo de veredictos con `Object.defineProperty` pasó a `Map` + `Object.fromEntries` · close calls: el fixture `DELEGATION_REPORT` copia el reporte entero — se queda, es lo que pide A3
 
 ## T2 — Pipeline de etapas
 
