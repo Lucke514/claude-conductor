@@ -115,7 +115,10 @@
       "usePty": false,
       "outputFormat": "stream-json",
       "modelFlag": "--model",
-      "readModeArgs": [],
+      "readModeArgs": [
+        "--mode",
+        "plan"
+      ],
       "writeModeArgs": [
         "--dangerously-skip-permissions"
       ],

@@ -482,6 +482,27 @@ describe("nested-repos: delegate with repo", () => {
     expect(git(nested, "branch", "--list", "mp/*")).toBe("");
   });
 
+  it("R6/SC4: readMode cwd with a reachable .env is refused before any worker; allowCwdWithSecrets runs it with a note", async () => {
+    const { root } = makeWorkspace();
+    const spy = spyAdapters();
+    const cfg = { isolation: { readMode: "cwd" } };
+    const err = await delegate({ provider: "codex", task: "t" }, { ...ctx(root, cfg), adapters: spy.adapters }).catch((e) => e);
+    expect(err).toMatchObject({ code: "UNSAFE_READ_MODE" });
+    expect(err.message).toContain("backend-monolith/.env");
+    expect(spy.calls).toEqual([]);
+    // The same through repo: the scan covers the repo's own tree.
+    await expect(delegate({ provider: "codex", task: "t", repo: "backend-monolith" }, { ...ctx(root, cfg), adapters: spy.adapters })).rejects.toMatchObject({
+      code: "UNSAFE_READ_MODE",
+    });
+    expect(spy.calls).toEqual([]);
+    const ok = await delegate({ provider: "codex", task: "t" }, { ...ctx(root, { isolation: { readMode: "cwd", allowCwdWithSecrets: true } }), adapters: spy.adapters });
+    expect(ok.status).toBe("success");
+    expect(spy.calls).toEqual(["codex"]);
+    expect(ok.notes?.some((n) => n.includes("allowCwdWithSecrets") && n.includes("backend-monolith/.env"))).toBe(true);
+    // A tree without .env files runs in cwd as before.
+    expect((await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo(), cfg), adapters: spyAdapters().adapters })).status).toBe("success");
+  });
+
   it("E1: a nested repo without commits names the repo", async () => {
     const root = makeRepo();
     const empty = path.join(root, "fresh");

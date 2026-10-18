@@ -10,7 +10,7 @@ import { realOrResolved } from "./worktree.js";
  * worktree or worker exists.
  */
 
-export type RepoErrorCode = "REPO_INVALID" | "REPO_NOT_GIT" | "REPO_NOT_FOUND";
+export type RepoErrorCode = "REPO_INVALID" | "REPO_NOT_GIT" | "REPO_NOT_FOUND" | "UNSAFE_READ_MODE";
 
 export class RepoError extends Error {
   constructor(

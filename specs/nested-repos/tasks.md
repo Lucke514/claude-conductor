@@ -107,8 +107,8 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
 
 ## T5 — Guardia de `readMode: "cwd"` y agy en plan
 
-- [ ] Open
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C5 · **Implements**: R6, R7
 - **Files**: `server/src/secrets-scan.ts`, `server/src/delegate.ts`, `server/src/config.ts`, `server/src/providers/antigravity.ts`, `config/multiprovider.example.json`, `server/tests/secrets-scan.spec.ts`, `server/tests/delegate.spec.ts`, `server/tests/adapters.spec.ts`
 - **Do**:
@@ -123,11 +123,12 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
   - agy en read lleva `--mode plan`, y un `readModeArgs` explícito lo reemplaza;
   - los tests existentes siguen pasando.
 - **Verify**: `npm --prefix server test -- secrets-scan delegate adapters`
+- **Notes**: Hecha por Claude. `server/src/secrets-scan.ts` hace un recorrido en anchura acotado (profundidad 6, 20 000 entradas, 5 hallazgos), sin seguir symlinks y saltando `node_modules` y `.git`. `delegate()` sin worktree (`readMode: "cwd"`) lanza `UNSAFE_READ_MODE` (código en `RepoError`) antes de lanzar al worker, salvo con `isolation.allowCwdWithSecrets`, que deja una nota. agy en read usa `DEFAULT_READ_ARGS = ["--mode", "plan"]`, comprobado contra `agy --help` 1.4.2 (`--mode accept-edits|auto|plan`). En el ejemplo de config, `readModeArgs` muestra ese mismo valor en vez de `[]`, que lo anulaba. Se actualizó **un test existente**: `adapters.spec.ts::"plain spawn…"` fijaba los args exactos de agy en read; el cambio es el default deliberado de R7, no algo de `repo`, así que SC8 sigue cumpliéndose para `repo`/`**Repo**`. Tests nuevos: `secrets-scan.spec.ts` (3), SC4 en `delegate.spec.ts` y R7 en `adapters.spec.ts`. Gates: typecheck 0 errores, 299 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: `UNSAFE_READ_MODE` vive en `RepoErrorCode` para reutilizar el reporte de `code` de `fail()`, aunque no es un error de repo
 
 ## T6 — Cadena por modo
 
 - [ ] Open
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C6 · **Implements**: R8
 - **Files**: `server/src/config.ts`, `server/src/fallback.ts`, `server/src/delegate.ts`, `server/src/sdd/task-delegation.ts`, `server/tests/config.spec.ts`, `server/tests/delegate.spec.ts`
 - **Do**:

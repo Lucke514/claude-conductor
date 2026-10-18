@@ -80,6 +80,8 @@ export const ConfigSchema = z.object({
       symlink: z.array(z.string()).default([]),
       /** Per-repo `symlink` for delegations with `repo` (key: the repo path relative to the project). */
       symlinkByRepo: z.record(z.string(), z.array(z.string())).default({}),
+      /** Let readMode "cwd" run although `.env*` files are reachable from the worker's directory (R6). */
+      allowCwdWithSecrets: z.boolean().default(false),
     })
     .prefault({}),
   verify: z

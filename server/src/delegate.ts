@@ -6,7 +6,8 @@ import { repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
 import { PROVIDER_NAMES, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
-import { resolveRepo } from "./repo.js";
+import { RepoError, resolveRepo } from "./repo.js";
+import { scanSecrets } from "./secrets-scan.js";
 import { recordCall, recordRecent, registerRepo, taskLabel, type StateStore } from "./state.js";
 import type { JobRegistry } from "./jobs.js";
 import { checkRemotePush, type PushViolation } from "./remote-check.js";
@@ -146,6 +147,20 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     // R11: remember the nested repo so cleanup and status find its mp/* worktrees.
     if (target) await ctx.store.update((s) => registerRepo(s, target.root)).catch(() => undefined);
     const isolate = mode === "write" || config.isolation.readMode === "worktree";
+    if (!isolate) {
+      // R6: without a worktree the worker reads the real tree; refuse while it holds reachable .env files.
+      const scan = await scanSecrets(codeDir);
+      if (scan.found.length > 0 || scan.truncated) {
+        const what = scan.found.length > 0 ? `.env files are reachable (${scan.found.join(", ")}${scan.truncated ? ", …" : ""})` : "the scan for .env files hit its limit";
+        if (!config.isolation.allowCwdWithSecrets) {
+          throw new RepoError(
+            "UNSAFE_READ_MODE",
+            `isolation.readMode "cwd" refused: ${what}. Use readMode "worktree" (ignored files never reach the worker), or set isolation.allowCwdWithSecrets: true to accept the risk. No worker was started.`,
+          );
+        }
+        notes.push(`readMode "cwd" ran although ${what} (isolation.allowCwdWithSecrets: true)`);
+      }
+    }
     if (mode === "write" && !repoRoot) {
       return finish({
         provider: null,
