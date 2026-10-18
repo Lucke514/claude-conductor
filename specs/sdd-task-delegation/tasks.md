@@ -33,7 +33,7 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 ## T3 [P] — Claim y handback
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C3 · **Implements**: R5, R6, R9, E6, E10
 - **Files**: `server/src/sdd/claim.ts`, `server/tests/sdd-claim.spec.ts`
 - **Do**: Implementar `checkDelegable`, `writeOwner` (reescribe solo la línea `**Owner**` de la tarea, atómico), `claimCommitted` (`git show HEAD:specs/<slug>/tasks.md` + árbol no revertido) y el comando de commit con pathspec `-- specs/<slug>/tasks.md`.
