@@ -2,7 +2,7 @@
 
 # Spec: Delegación de tareas SDD
 
-> Status: draft
+> Status: in-review
 > Owner: Lucas Gonzalez Espinosa (@Lucke514)
 > Sign-off: — the session's user holds all of these
 > Tracking: — this project tracks work in the repo only
@@ -33,14 +33,14 @@ Permitir que Claude delegue a Codex o Antigravity **una tarea concreta** (`T#` o
 - **R3** — El brief del worker contiene, de forma literal: el `Do`, el `Acceptance`, el `Verify` y los `Files` de la tarea; el texto completo de cada `R#`/`E#` que la tarea cita en `Implements`, tomado de `spec.md`; la sección del componente `C#` que la tarea cita, tomada de `plan.md`; y los comandos de los quality gates del plan.
   - Given T3 con `Implements: R1, E2` y `Component: C2`, when se construye el brief, then incluye los textos de R1, E2 y C2 tal como aparecen en los artefactos.
 - **R4** — El brief incrusta el contenido actual de cada archivo existente listado en `Files`, con los mismos límites de tamaño y exclusiones que `delegate`; un archivo listado que aún no existe aparece como "a crear".
-- **R5** — La delegación se rechaza, sin lanzar ningún worker, cuando `spec.md` o `tasks.md` no tienen `Status: approved`, o cuando la tarea está cerrada (`[x]`, `[~]`, `[>]`), bloqueada (`[!]`) o reclamada por otro owner.
+- **R5** — La delegación se rechaza, sin lanzar ningún worker, cuando `spec.md`, `tasks.md` o —si existe— `plan.md` no tienen `Status: approved`, o cuando la tarea está cerrada (`[x]`, `[~]`, `[>]`), bloqueada (`[!]`) o reclamada por otro owner.
   - Given `tasks.md` en `Status: in-review`, when se delega cualquier tarea, then la respuesta es un error que nombra el artefacto y su Status, y no se crea worktree.
-- **R6** — Antes de que el worker arranque, el `**Owner**` de la tarea en `tasks.md` del árbol de trabajo del usuario nombra al proveedor y la fecha, y ese cambio queda committeado por Claude (no por el worker), cumpliendo la regla de claim de spec-driven.
+- **R6** — Antes de que el worker arranque, la herramienta escribe en `tasks.md` del árbol de trabajo del usuario el `**Owner**` de la tarea con el proveedor y la fecha, y Claude committea ese cambio con `git commit` normal (ni la herramienta ni el worker hacen commits), cumpliendo la regla de claim de spec-driven.
   - Given T3 sin owner, when se delega a codex, then `tasks.md` muestra `**Owner**: codex (multi-provider) since 2026-10-18` en un commit anterior al inicio del worker.
 - **R7** — En modo write, al terminar el worker se ejecuta dentro del worktree el comando `Verify` de la tarea y luego los gates del plan; la respuesta informa de cada comando (pasa o falla, con extracto de salida) y, en los gates, si la falla es nueva respecto al baseline registrado en el plan.
 - **R8** — La respuesta incluye, por cada criterio del `Acceptance` y cada `R#`/`E#` de la tarea, el veredicto del worker (cumple / no cumple / no verificable) y un borrador de la línea `**Notes**` que cita el id de la delegación; la herramienta nunca marca la casilla `[x]` ni escribe `Notes` por sí misma.
 - **R9** — Cuando la delegación se descarta, o cuando todos los proveedores fallan, el `**Owner**` de la tarea vuelve a `—` (handback), y la respuesta lo indica.
-- **R10** — El slash command `/sdd-delegate <slug> <T#|G#|next> [codex|antigravity|auto] [--read]` ejecuta el flujo completo: comprobación, claim con commit, delegación y presentación del resultado con los siguientes pasos (aplicar, descartar).
+- **R10** — El slash command `/sdd-delegate <slug> <T#|G#|next> [codex|antigravity|auto] [--read]` usa `auto` como proveedor y modo write cuando no se indican, y ejecuta el flujo completo: comprobación, claim con commit, delegación y presentación del resultado con los siguientes pasos (aplicar, descartar).
 
 **Minimum shippable**: R1, R3, R4, R5, R6, R7, R8, R9, E1, E2, E3, E5.
 
@@ -71,13 +71,14 @@ Permitir que Claude delegue a Codex o Antigravity **una tarea concreta** (`T#` o
 - 2026-10-18 La división de la integración SDD en seis capacidades y su orden fueron aprobados por el usuario — ver `specs/sdd-integration/scope.md`.
 - 2026-10-18 La herramienta nunca marca `[x]` ni escribe `Notes`: devuelve un borrador — porque spec-driven exige la autorrevisión de clean-code antes de cerrar una tarea, y esa revisión la hace Claude, no el worker.
 - 2026-10-18 Los comandos `Verify` y los gates se ejecutan sin shell (E3) — porque es una regla del plugin desde su origen (spawn sin shell, nunca `exec` con string interpolado).
+- 2026-10-18 El commit de claim (R6) lo hace Claude con `git commit` normal; la herramienta solo escribe la línea `**Owner**` — para que el commit pase por los hooks del usuario y no exista un segundo camino que haga commits.
+- 2026-10-18 R5 exige también `plan.md` en `Status: approved` cuando existe (features Standard) — porque las tareas se derivan del plan aprobado.
+- 2026-10-18 `/sdd-delegate` usa `auto` como proveedor por defecto (R10) — reutiliza el routing y la cadena de fallback actuales.
+- 2026-10-18 El modo por defecto es write (R10); `--read` queda para investigación — porque una tarea de `tasks.md` es trabajo de implementación.
 
 ## Open questions
 
-- [NEEDS CLARIFICATION: ¿El commit de claim (R6) lo hace la herramienta MCP o Claude? Por defecto, Claude: la herramienta escribe la línea `**Owner**` y Claude hace el commit con `git commit` normal, de modo que pasa por tus hooks (`commit-msg` sin atribución) y no hay un segundo camino que haga commits.]
-- [NEEDS CLARIFICATION: ¿Exigimos `Status: approved` también en `plan.md` (R5)? Por defecto, sí cuando existe `plan.md` (features Standard), porque las tareas se derivan del plan aprobado.]
-- [NEEDS CLARIFICATION: Proveedor por defecto de `/sdd-delegate` cuando no se indica: `auto` (routing actual) o el primero de la cadena. Por defecto, `auto`.]
-- [NEEDS CLARIFICATION: ¿Modo por defecto: write o read? Por defecto, write: una tarea de `tasks.md` es trabajo de implementación; `--read` queda para investigación.]
+- Ninguna.
 
 ## Success criteria
 
