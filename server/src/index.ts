@@ -12,7 +12,7 @@ import { checkHealth } from "./health.js";
 import { StateStore } from "./state.js";
 import { applyWorktree, cleanupWorktrees, readMeta, removeWorktree } from "./worktree.js";
 
-const VERSION = "0.1.1";
+const VERSION = "0.2.0";
 
 export function projectDir(): string {
   const env = process.env.MP_PROJECT_DIR ?? process.env.CLAUDE_PROJECT_DIR;
