@@ -3,7 +3,7 @@
 # Plan: Delegación de tareas SDD
 
 > Spec: [spec.md](./spec.md)
-> Status: in-review
+> Status: approved
 > Last updated: 2026-10-18
 
 ## Approach
