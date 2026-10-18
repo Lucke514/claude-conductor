@@ -83,8 +83,8 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 
 ## T5 — Delegación automática y confirmación en repos SDD
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C5 · **Implements**: R1, R2, E1
 - **Files**: `server/src/hooks.ts`, `server/tests/hooks-setup.spec.ts`
 - **Do**: añadir `isSddRepo`, el bloque SDD de `userPromptSubmit` y el aviso de `preDelegate` para `delegate` en write.
@@ -94,7 +94,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
   - Sin `specs/`, los textos son los de hoy.
   - `sdd_task_delegate` no recibe el aviso.
 - **Verify**: `npm --prefix server test -- hooks-setup`
-- **Notes**: —
+- **Notes**: `isSddRepo`, `SDD_AUTO_CONTEXT` y `SDD_DELEGATE_WARNING` en `server/src/hooks.ts`; `userPromptSubmit` añade el bloque SDD y `preDelegate` el aviso para `delegate` en write; 3 casos en `server/tests/hooks-setup.spec.ts`; commit `sdd-guardrails: T5 point auto-delegation at /sdd-delegate`. Gates: typecheck 0 errores, 196 passed. Clean-code: none · close calls: none
 
 ## T6 — Auditoría de las violaciones nuevas
 

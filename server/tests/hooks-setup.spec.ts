@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { AUTO_DELEGATE_CONTEXT, extractDelegateResult, postDelegate, preBash, preDelegate, splitCommand, userPromptSubmit } from "../src/hooks.js";
+import { AUTO_DELEGATE_CONTEXT, extractDelegateResult, postDelegate, preBash, preDelegate, SDD_AUTO_CONTEXT, SDD_DELEGATE_WARNING, splitCommand, userPromptSubmit } from "../src/hooks.js";
 import { applySettings, installGitHooks, setAutoDelegate, statuslineCommand, setStatuslineMode, uninstallGitHooks } from "../src/setup.js";
 import { makeRepo, tmpDir } from "./helpers.js";
 import { worktreesDir } from "../src/paths.js";
@@ -79,6 +79,41 @@ describe("UserPromptSubmit (auto-delegation)", () => {
     expect(await userPromptSubmit({ cwd: tmpDir(), prompt: "refactoriza pagos" })).toBeUndefined();
     await setAutoDelegate(true);
     expect(await userPromptSubmit({ cwd: tmpDir(), prompt: "refactoriza pagos" })).toBeDefined();
+  });
+});
+
+describe("spec-driven repos (sdd-guardrails R1, R2, E1)", () => {
+  const sddDir = () => {
+    const dir = tmpDir();
+    mkdirSync(path.join(dir, "specs", "demo"), { recursive: true });
+    writeFileSync(path.join(dir, "specs", "demo", "spec.md"), "# Spec\n");
+    return dir;
+  };
+  it("auto-delegation points implementation work at /sdd-delegate", async () => {
+    const out = (await userPromptSubmit({ cwd: sddDir(), prompt: "implementa la tarea siguiente" })) as any;
+    expect(out.hookSpecificOutput.additionalContext).toBe(`${AUTO_DELEGATE_CONTEXT} ${SDD_AUTO_CONTEXT}`);
+    expect(SDD_AUTO_CONTEXT).toContain("/sdd-delegate");
+    expect(SDD_AUTO_CONTEXT).toMatch(/never the `delegate` tool in write mode/);
+  });
+  it("a write delegate in an SDD repo asks with the warning; sdd_task_delegate and read mode do not get it", async () => {
+    const dir = sddDir();
+    const write = (await preDelegate({ cwd: dir, tool_input: { provider: "codex", task: "t", mode: "write" } })) as any;
+    expect(write.hookSpecificOutput.permissionDecision).toBe("ask");
+    expect(write.hookSpecificOutput.permissionDecisionReason).toContain(SDD_DELEGATE_WARNING);
+    expect(SDD_DELEGATE_WARNING).toContain("/sdd-delegate");
+    const tool_name = "mcp__plugin_multi-provider_multi-provider__sdd_task_delegate";
+    const sdd = (await preDelegate({ cwd: dir, tool_name, tool_input: { slug: "demo", task: "T1" } })) as any;
+    expect(sdd.hookSpecificOutput.permissionDecisionReason).not.toContain(SDD_DELEGATE_WARNING);
+    const read = (await preDelegate({ cwd: dir, tool_input: { provider: "codex", task: "t", mode: "read" } })) as any;
+    expect(read.hookSpecificOutput.permissionDecision).toBeUndefined();
+  });
+  it("without specs/ nothing changes", async () => {
+    const write = (await preDelegate({ cwd: tmpDir(), tool_input: { provider: "codex", task: "t", mode: "write" } })) as any;
+    expect(write.hookSpecificOutput.permissionDecisionReason).not.toContain(SDD_DELEGATE_WARNING);
+    const dir = tmpDir();
+    mkdirSync(path.join(dir, "specs", "empty"), { recursive: true });
+    const out = (await userPromptSubmit({ cwd: dir, prompt: "revisa" })) as any;
+    expect(out.hookSpecificOutput.additionalContext).toBe(AUTO_DELEGATE_CONTEXT);
   });
 });
 
