@@ -441,3 +441,12 @@ export function ctxBar(percent: number | undefined, width = 10): string {
   const filled = Math.round((p / 100) * width);
   return "━".repeat(filled) + "─".repeat(width - filled);
 }
+
+/** "claude-sonnet-5-5[1m]" → "Sonnet 5.5"; anything else is shown as given. */
+export function prettyModel(id: string | undefined): string | undefined {
+  if (!id) return id;
+  const m = id.match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:$|[-\[@])/i);
+  if (!m) return id;
+  const family = m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1);
+  return `${family} ${m[2]}${m[3] ? `.${m[3]}` : ""}`;
+}

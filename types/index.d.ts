@@ -5,6 +5,7 @@ export type Running = { provider: string; mode: string; task: string; startedAt:
 export type SessionTally = { calls: number; tokens: number }
 export type SessionMeta = { model?: string; ctxPercent?: number; costUsd?: number; repo?: string; branch?: string }
 export type Cleaned = { at: number; rows: number }
+export type Placement = 'side' | 'below'
 
 export type SpecTask = { id: string; title: string; box: string; owner: string }
 export type SpecProgress = {
@@ -59,6 +60,8 @@ declare module 'claude-code' {
       meta: SessionMeta
       spec: SpecProgress | null
       cleaned: Cleaned | null
+      placement: Placement
+      paneShown: boolean
     }
   }
 }
