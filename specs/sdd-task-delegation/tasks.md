@@ -22,7 +22,7 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 ## T2 [P] — Brief de la tarea
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C2 · **Implements**: R3, R4, E5
 - **Files**: `server/src/sdd/brief.ts`, `server/src/prompt-builder.ts`, `server/tests/sdd-brief.spec.ts`
 - **Do**: Implementar `buildTaskBrief(feature, task)` con Do, Acceptance, Verify, Files, el texto de cada `R#`/`E#` citado, la sección `C#` y los comandos de los gates; `extraOutput` con la sección `## Acceptance` del worker. En `buildPrompt`: `extraOutput?` y `reason: "does not exist yet — to be created"` para archivos listados inexistentes.
