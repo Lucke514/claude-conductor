@@ -1,6 +1,6 @@
 {
   "name": "multi-provider-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "MCP server that delegates tasks to local AI CLIs (Codex, Antigravity) under Claude Code supervision",
   "type": "module",
   "private": true,

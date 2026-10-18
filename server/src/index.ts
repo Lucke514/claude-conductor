@@ -14,7 +14,7 @@ import { JobRegistry } from "./jobs.js";
 import { StateStore } from "./state.js";
 import { applyWorktree, cleanupWorktrees, readMeta, removeWorktree } from "./worktree.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 export function projectDir(): string {
   const env = process.env.MP_PROJECT_DIR ?? process.env.CLAUDE_PROJECT_DIR;
