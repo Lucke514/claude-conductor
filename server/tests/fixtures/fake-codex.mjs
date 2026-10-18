@@ -53,6 +53,14 @@ process.stdin.on("end", () => {
       process.exit(0);
       break;
     }
+    case "message": {
+      // Writes FAKE_WRITE_FILE (if set) and answers with FAKE_MESSAGE.
+      if (process.env.FAKE_WRITE_FILE) writeFileSync(path.join(cwd, process.env.FAKE_WRITE_FILE), "from worker\n");
+      out({ type: "item.completed", item: { id: "i2", type: "agent_message", text: process.env.FAKE_MESSAGE ?? "" } });
+      out({ type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } });
+      process.exit(0);
+      break;
+    }
     case "try-commit": {
       writeFileSync(path.join(cwd, "added-by-worker.txt"), "hello\n");
       let blocked = false;

@@ -18,6 +18,8 @@ export interface DelegateParams {
   model?: string;
   taskType?: string;
   fallback?: boolean;
+  /** Extra "Expected output" lines for the worker (e.g. the SDD Acceptance section). */
+  extraOutput?: string[];
   /** Claude Code session id (injected by the PreToolUse hook). */
   sessionId?: string;
 }
@@ -73,6 +75,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     projectDir: ctx.projectDir,
     maxFileBytes: config.defaults.maxFileBytes,
     maxTotalBytes: config.defaults.maxTotalBytes,
+    ...(params.extraOutput ? { extraOutput: params.extraOutput } : {}),
   });
 
   const routing = params.provider === "auto" ? routeTask(params.task, config.routing, params.taskType) : undefined;

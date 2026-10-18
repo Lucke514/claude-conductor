@@ -21,6 +21,7 @@ export async function delegate(params, ctx) {
         projectDir: ctx.projectDir,
         maxFileBytes: config.defaults.maxFileBytes,
         maxTotalBytes: config.defaults.maxTotalBytes,
+        ...(params.extraOutput ? { extraOutput: params.extraOutput } : {}),
     });
     const routing = params.provider === "auto" ? routeTask(params.task, config.routing, params.taskType) : undefined;
     const first = params.provider === "auto" ? routing?.provider : params.provider;

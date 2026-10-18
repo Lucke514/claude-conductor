@@ -54,14 +54,14 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 
 ## T5 — Herramientas MCP `sdd_task_*`
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C5 · **Implements**: R1, R5, R6, R8, R9, E6, E9
 - **Files**: `server/src/sdd/task-delegation.ts`, `server/src/index.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/fixtures/fake-codex.mjs`
 - **Do**: Implementar y registrar `sdd_task_claim`, `sdd_task_delegate` (mode por defecto write, provider del Owner, error sin worker si el claim no está committeado, C4 tras el diff, `sdd.acceptance` parseado y `notesDraft` con el id, handback en `fallback_to_claude`/`failed`) y `sdd_task_release`. Añadir al CLI falso un modo que emita la sección `## Acceptance`.
 - **Acceptance**: Sin commit del claim → error y el CLI falso no se invoca; con commit → diff, verificación y veredictos; criterio sin línea → `unverifiable`; todos los proveedores fallan → Owner `—`; Verify falla → worktree conservado y Owner intacto; `tasks.md` nunca recibe `[x]` ni Notes.
 - **Verify**: `npm --prefix server test -- sdd-task-delegation`
-- **Notes**: —
+- **Notes**: `server/src/sdd/task-delegation.ts` (`sddTaskClaim`, `sddTaskDelegate`, `sddTaskRelease`, `parseAcceptance`), registro en `server/src/index.ts` (errores con `code`), `extraOutput` en `DelegateParams`, modo `message` en `server/tests/fixtures/fake-codex.mjs` y `server/tests/sdd-task-delegation.spec.ts` (7 casos); control negativo de R6: sin la comprobación del claim el test falla ("promise resolved … instead of rejecting"); commit `sdd-task-delegation: T5 sdd_task_* MCP tools`. Gates: typecheck 0 errores, 179 passed. Clean-code: none · close calls: `sdd_task_delegate` rechaza `next` — se queda, la tarea ya debe estar reclamada y `next` elegiría otra
 
 ## T6 — Confirmación en write y `sessionId` para `sdd_task_delegate`
 
