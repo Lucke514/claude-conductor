@@ -44,7 +44,7 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 ## T4 [P] — Verificación de la tarea
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C4 · **Implements**: R7, E3, E9
 - **Files**: `server/src/sdd/verify.ts`, `server/tests/sdd-verify.spec.ts`
 - **Do**: Implementar `verifyTask(worktreePath, task, gates, timeoutMs)`: detección de sintaxis de shell → `manual` sin ejecutar; `splitCommand` + `runProcess` sin shell; gates `pipeline-only` → `manual`; `newFailure` según la baseline (true solo si registra 0 fallos, `"compare"` si registra preexistentes); no borra el worktree.
