@@ -182,8 +182,8 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
 
 ## T9 — Documentación
 
-- [ ] Open
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C8 · **Implements**: R1–R12 (documentación), R3 (riesgo residual)
 - **Files**: `README.md`, `docs/nested-repos.md`, `skills/multi-provider/SKILL.md`, `commands/delegate.md`, `commands/sdd-delegate.md`, `agents/codex-worker.md`, `agents/agy-worker.md`
 - **Do**:
@@ -195,3 +195,4 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
   - el riesgo residual está escrito en `docs/nested-repos.md` y en el README;
   - `claude plugin validate .` pasa.
 - **Verify**: `claude plugin validate .`
+- **Notes**: Hecha por Claude. `docs/nested-repos.md` (nuevo) cubre `repo`, `**Repo**` y su orden de resolución, los errores `REPO_*` y `UNSAFE_READ_MODE`, la config nueva, `requestedProvider`, el `Verify` con varios comandos, `/mp-doctor` y el riesgo residual de Q1. README: filas de `chainByMode`, `allowCwdWithSecrets`, `symlinkByRepo` y `readModeArgs` de agy, una sección "Workspaces con repos anidados", 3 filas de troubleshooting y 2 limitaciones (incluido el riesgo residual). El skill, `commands/delegate.md` (`--repo`), `commands/sdd-delegate.md` y los dos agentes (`repo`, `requestedProvider` en el veredicto) quedan actualizados. Gates: typecheck 0 errores, 308 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: `config/multiprovider.example.json` no muestra `chainByMode` ni `symlinkByRepo` (no estaba en Files); el README y la doc los documentan con ejemplo
