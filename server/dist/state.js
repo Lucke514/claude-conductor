@@ -1,6 +1,9 @@
 import { statePath } from "./paths.js";
 import { readJson, withLock, writeFileAtomic } from "./fsutil.js";
 const MAX_SESSIONS = 30;
+export const MAX_HISTORY = 10;
+export const MAX_RECENT = 8;
+export const TASK_LABEL_CHARS = 60;
 export function emptyState() {
     return { version: 1, updatedAt: new Date().toISOString(), chain: [], providers: {}, sessions: {} };
 }
@@ -67,11 +70,21 @@ export function recordCall(s, rec, now = new Date()) {
     if (rec.error)
         m.lastError = { ...rec.error, message: rec.error.message.slice(0, 200), at: now.toISOString() };
     p.metrics = m;
+    const hist = p.history ?? [];
+    hist.push({ at: now.toISOString(), ok: !rec.error, tokens, durationMs: rec.durationMs });
+    p.history = hist.slice(-MAX_HISTORY);
     const sess = (s.sessions[rec.sessionKey] ??= { lastAt: now.toISOString(), providers: {} });
     sess.lastAt = now.toISOString();
     const sp = (sess.providers[rec.provider] ??= { calls: 0, tokens: 0, durationMs: 0 });
     sp.calls++;
     sp.tokens += tokens;
     sp.durationMs += rec.durationMs;
+}
+export function taskLabel(task) {
+    const oneLine = task.replace(/\s+/g, " ").trim();
+    return oneLine.length > TASK_LABEL_CHARS ? `${oneLine.slice(0, TASK_LABEL_CHARS - 1)}…` : oneLine;
+}
+export function recordRecent(s, d) {
+    s.recent = [d, ...(s.recent ?? []).filter((r) => r.id !== d.id)].slice(0, MAX_RECENT);
 }
 //# sourceMappingURL=state.js.map

@@ -37,6 +37,7 @@ End with exactly this block:
 
 ```
 VERDICT: ACCEPT | REQUEST_CHANGES | DISCARD
+delegation: <id from the delegate response>
 provider: <provider actually used> (attempts: <short summary>)
 worktreePath: <path or n/a>
 verified: <what you checked and how — files read, commands run with exit codes>

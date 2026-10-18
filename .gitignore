@@ -4,3 +4,6 @@ server/.install.lock/
 .DS_Store
 coverage/
 # server/dist is committed on purpose: marketplace installs copy the repo without building.
+# Written by Claude Code when it loads the plugin from a folder (API types for editors).
+.claude-plugin/types/
+/tsconfig.json

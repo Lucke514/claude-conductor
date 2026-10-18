@@ -41,7 +41,8 @@ Después ejecuta **`/mp-setup`** (ver más abajo): desactiva la atribución, ins
 ```bash
 git clone https://github.com/Lucke514/claude-conductor && cd claude-conductor
 npm install && npm run build      # instala server/ y compila con tsc
-npm test                          # vitest
+npm test                          # vitest (server/tests/*.spec.ts)
+claude plugin test .              # tests de la conductor card (tests/*.test.tsx)
 claude --plugin-dir .             # probar el plugin sin instalarlo
 ```
 
@@ -170,6 +171,34 @@ Claude verifica → ACCEPT: delegation_apply (git apply --3way) + commit propio 
 
 Todo esto es un respaldo frente a bugs conocidos en los que el setting no se respeta.
 
+## Conductor card (banda encima del prompt)
+
+Además de la status line, el plugin dibuja una **card propia encima del prompt**: la orquesta de proveedores de un vistazo. Usa los módulos de UI para plugins de Claude Code (API en *early access*; probado con **v2.1.302**). En versiones que no los soportan, la card simplemente no aparece y el resto del plugin funciona igual.
+
+```text
+╭────────────────────────────────────────────────────────────────────────────────────╮
+│ ◆ conductor  ·  sesión 4 delegaciones · 13.5k tok   partitura codex → agy → claude │
+│ codex  ● afinado        3 llamadas · 12k tok · 1m42s                     ▁▂▅▃▇     │
+│ agy    ◐ silencio 2m    circuito abierto · RATE_LIMIT ×3                 ▃▁▁▁▁     │
+│ última  codex · review src/auth · ✓ ACCEPT · hace 4m              e: expandir      │
+╰────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+- **Compacta** (por defecto): estado de cada proveedor, uso del día, mini-gráfica de las últimas llamadas y la última delegación con el veredicto del worker.
+- **Expandida** (`e`, con la banda enfocada mediante `ctrl+x tab` o un clic): una tarjeta por proveedor con barras de llamadas, tokens y tiempo, versión, auth y circuito con cuenta atrás; las últimas delegaciones; y los atajos `1` `/providers-status`, `2` `/providers-config` y `3` limpiar worktrees.
+- **Estados**:
+  - *en curso*: borde latón, spinner, modo y reloj de la delegación activa;
+  - *primer uso*: te sugiere el primer `/delegate` y `/mp-setup`;
+  - *degradado*: el rojo solo aparece en lo que bloquea, siempre con su arreglo (`codex login`…);
+  - *solo Claude*: proveedores tachados en la partitura.
+- Plegarla: el `[-]` que dibuja Claude Code (o `ctrl+x ctrl+a`). Desactivarla del todo: `"card": { "enabled": false }` en `multiprovider.json`.
+- **Datos**: igual que la status line, solo lee `~/.claude/multi-provider/state.json` (refresco cada 10 s y al terminar cada delegación) y nunca invoca los CLIs.
+  - Para alimentarla, el servidor guarda ahí las últimas 8 delegaciones (con los primeros 60 caracteres de la tarea, solo en local; el log de auditoría sigue sin contenido) y el historial de las últimas 10 llamadas por proveedor.
+  - El veredicto `ACCEPT / REQUEST_CHANGES / DISCARD` sale del informe de `codex-worker` / `agy-worker` y se guarda en el almacenamiento del plugin.
+- Diseño: [artefacto "Conductor terminal card"](https://claude.ai/artifact/55uqG9zjRWAzcB4ckzXMJx) (privado; compártelo desde su menú Share si quieres que otros lo vean).
+
+Código: `hooks/conductor/card.tsx` (render y eventos), `hooks/conductor/model.ts` (vista pura, testeada con Vitest), `types/index.d.ts` (contrato de su estado) y `tests/conductor-card.test.tsx` (`claude plugin test .`).
+
 ## Status line
 
 `statusline/index.js` es Node puro, sin dependencias y en CommonJS:
@@ -228,10 +257,11 @@ Instalación: el formato actual de plugins **no** permite declarar `statusLine` 
 ```text
 .claude-plugin/{plugin.json,marketplace.json}   .mcp.json   hooks/hooks.json
 agents/{codex-worker,agy-worker}.md   commands/*.md   skills/multi-provider/SKILL.md
+hooks/conductor/{card.tsx,model.ts}   types/index.d.ts   tests/conductor-card.test.tsx
 config/multiprovider.example.json     statusline/index.js
 server/  bootstrap.mjs · src/{index,cli,config,delegate,fallback,circuit-breaker,health,worktree,
          prompt-builder,process,state,audit,hooks,setup,sanitize,gh-scrub}.ts · providers/{types,codex,antigravity}.ts
-         tests/ (vitest + binarios fake) · dist/ (compilado, versionado)
+         tests/ (vitest *.spec.ts + binarios fake) · dist/ (compilado, versionado)
 ```
 
 ## Licencia

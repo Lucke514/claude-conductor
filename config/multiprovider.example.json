@@ -36,6 +36,9 @@
   "statusline": {
     "mode": "compact"
   },
+  "card": {
+    "enabled": true
+  },
   "providers": {
     "codex": {
       "enabled": true,

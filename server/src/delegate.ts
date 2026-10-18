@@ -6,7 +6,7 @@ import { repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
 import { PROVIDER_NAMES, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
-import { recordCall, type StateStore } from "./state.js";
+import { recordCall, recordRecent, taskLabel, type StateStore } from "./state.js";
 import { collectChanges, createWorktree, removeWorktree, workerGitEnv, type Changes, type Violation, type WorktreeMeta } from "./worktree.js";
 
 export interface DelegateParams {
@@ -205,6 +205,22 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     if (violations.length > 0) response.violations = violations;
     if (notes.length > 0) response.notes = notes;
     response.nextSteps = nextSteps(response);
+
+    await ctx.store
+      .update((s) =>
+        recordRecent(s, {
+          id,
+          at: new Date().toISOString(),
+          requested: params.provider,
+          provider: response.provider,
+          mode,
+          status: response.status,
+          task: taskLabel(params.task),
+          durationMs: response.durationMs,
+          ...(response.filesChanged ? { filesChanged: response.filesChanged.length } : {}),
+        }),
+      )
+      .catch(() => undefined);
 
     await appendAudit({
       id,
