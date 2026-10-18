@@ -1,0 +1,50 @@
+{
+  "description": "multi-provider: confirm write-mode delegations, verify worker diffs, health check on start, strip AI attribution from PR bodies/commits",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__plugin_multi-provider_multi-provider__delegate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs\" cli hook pre-delegate",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs\" cli hook pre-bash",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__plugin_multi-provider_multi-provider__delegate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs\" cli hook post-delegate",
+            "timeout": 900
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs\" cli hook session-start",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}
