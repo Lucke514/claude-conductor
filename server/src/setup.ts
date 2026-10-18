@@ -99,7 +99,7 @@ export async function applySettings(opts: {
     const ours = statuslineCommand();
     const existing = data.statusLine as { type?: string; command?: string } | undefined;
     const existingCmd = existing?.command;
-    const isOurs = typeof existingCmd === "string" && existingCmd.includes("multi-provider");
+    const isOurs = typeof existingCmd === "string" && (existingCmd === ours || existingCmd.includes(path.join(".claude", "multi-provider")));
     if (existingCmd && !isOurs) {
       if (opts.existingStatusLine === "abort") {
         throw new Error(`a status line is already configured (${existingCmd}); rerun with --statusline-compose or --statusline-replace`);
@@ -229,7 +229,9 @@ export async function installGitHooks(cwd: string): Promise<GitHooksResult> {
   }
 
   await fs.mkdir(ours, { recursive: true });
-  const sanitizeSrc = path.join(here, "sanitize.js");
+  // dist/sanitize.js (also resolvable when running from src/ under tests).
+  const sanitizeSrc = [path.join(here, "sanitize.js"), path.join(here, "..", "dist", "sanitize.js")].find((p) => existsSync(p));
+  if (!sanitizeSrc) throw new Error("dist/sanitize.js not found; run 'npm run build' in server/");
   await fs.copyFile(sanitizeSrc, path.join(ours, "mp-sanitize.mjs"));
   await fs.writeFile(path.join(ours, "mp-clean-commit-msg.mjs"), CLEANER);
   await fs.writeFile(path.join(ours, "commit-msg"), commitMsgHook(previous), { mode: 0o755 });

@@ -125,11 +125,14 @@ export async function createWorktree(opts: {
 }
 
 /** Env forcing our hooks for every git process the worker starts (git >= 2.31). */
-export function workerGitEnv(meta: WorktreeMeta): Record<string, string> {
+export function workerGitEnv(meta: WorktreeMeta, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  // Append to any GIT_CONFIG_* entries already present instead of clobbering them.
+  const n = Number.parseInt(env.GIT_CONFIG_COUNT ?? "0", 10);
+  const i = Number.isFinite(n) && n > 0 ? n : 0;
   return {
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "core.hooksPath",
-    GIT_CONFIG_VALUE_0: meta.hooksDir,
+    GIT_CONFIG_COUNT: String(i + 1),
+    [`GIT_CONFIG_KEY_${i}`]: "core.hooksPath",
+    [`GIT_CONFIG_VALUE_${i}`]: meta.hooksDir,
   };
 }
 

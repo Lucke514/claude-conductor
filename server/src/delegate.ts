@@ -84,6 +84,10 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
   const state = await ctx.store.read();
   for (const p of PROVIDER_NAMES) breaker.load(p, state.providers[p]?.breaker);
 
+  const violations: NonNullable<DelegateResponse["violations"]> = [];
+  const notes: string[] = [];
+  let kept: { meta: WorktreeMeta; changes: Changes } | undefined;
+
   const repoRoot = await repoRootOf(ctx.projectDir);
   const isolate = mode === "write" || config.isolation.readMode === "worktree";
   if (mode === "write" && !repoRoot) {
@@ -96,10 +100,6 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
       summary: "write mode requires a git repository (changes are isolated in a git worktree)",
     });
   }
-
-  const violations: NonNullable<DelegateResponse["violations"]> = [];
-  const notes: string[] = [];
-  let kept: { meta: WorktreeMeta; changes: Changes } | undefined;
 
   const execute = async (provider: ProviderName, adapter: ProviderAdapter): Promise<ProviderResult> => {
     let meta: WorktreeMeta | undefined;
