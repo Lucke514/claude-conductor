@@ -17,6 +17,8 @@ export interface PromptInput {
   projectDir: string;
   maxFileBytes: number;
   maxTotalBytes: number;
+  /** Extra lines appended to the "Expected output" section. */
+  extraOutput?: string[];
 }
 
 export interface FileReport {
@@ -103,7 +105,9 @@ async function readFileForPrompt(
       block: `### ${display}${note}\n${fence}${lang}\n${text}${text.endsWith("\n") ? "" : "\n"}${fence}\n`,
     };
   } catch (err) {
-    return { report: { path: display, included: false, reason: `unreadable: ${(err as NodeJS.ErrnoException).code ?? "error"}` } };
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { report: { path: display, included: false, reason: "does not exist yet — to be created" } };
+    return { report: { path: display, included: false, reason: `unreadable: ${code ?? "error"}` } };
   }
 }
 
@@ -169,7 +173,7 @@ export async function buildPrompt(input: PromptInput): Promise<BuiltPrompt> {
       parts.push("Files not included:", ...skipped.map((r) => `- ${r.path}: ${r.reason}`), "");
     }
   }
-  parts.push("## Expected output", outputFormatFor(input.mode), "");
+  parts.push("## Expected output", outputFormatFor(input.mode), ...(input.extraOutput ?? []), "");
   const prompt = parts.join("\n");
   return { prompt, sha256: createHash("sha256").update(prompt).digest("hex"), files: reports };
 }

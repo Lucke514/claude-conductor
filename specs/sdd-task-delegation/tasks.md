@@ -21,14 +21,14 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 
 ## T2 [P] — Brief de la tarea
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C2 · **Implements**: R3, R4, E5
 - **Files**: `server/src/sdd/brief.ts`, `server/src/prompt-builder.ts`, `server/tests/sdd-brief.spec.ts`
 - **Do**: Implementar `buildTaskBrief(feature, task)` con Do, Acceptance, Verify, Files, el texto de cada `R#`/`E#` citado, la sección `C#` y los comandos de los gates; `extraOutput` con la sección `## Acceptance` del worker. En `buildPrompt`: `extraOutput?` y `reason: "does not exist yet — to be created"` para archivos listados inexistentes.
 - **Acceptance**: El prompt contiene literal R1, E2 y C2 de los fixtures; los archivos existentes van incrustados, el inexistente figura "to be created" y `.env` figura excluido sin su contenido; `delegate.spec.ts` sigue pasando.
 - **Verify**: `npm --prefix server test -- sdd-brief delegate`
-- **Notes**: —
+- **Notes**: `server/src/sdd/brief.ts` (`buildTaskBrief`, `acceptanceItems`) y en `server/src/prompt-builder.ts` `extraOutput` y el motivo "does not exist yet — to be created" para archivos inexistentes; `server/tests/sdd-brief.spec.ts` (3 casos); commit `sdd-task-delegation: T2 task brief`. Gates: typecheck 0 errores, 164 passed. Clean-code: none · close calls: el criterio de Acceptance se parte por `; ` en ítems A1…An — se queda, es la unidad por la que el worker responde (R8)
 
 ## T3 [P] — Claim y handback
 
