@@ -45,6 +45,8 @@ npm test                          # vitest
 claude --plugin-dir .             # probar el plugin sin instalarlo
 ```
 
+Al abrir el repo como **proyecto**, Claude Code también lee el `.mcp.json` de la raíz y te pide aprobar el servidor `multi-provider`. Al aprobarlo, se ejecuta la copia de trabajo (`${CLAUDE_PLUGIN_ROOT:-.}` usa `.` cuando no corre como plugin), lo que sirve para probarlo mientras lo desarrollas. Los hooks, comandos y agentes **solo** se cargan cuando se instala como plugin o con `--plugin-dir .`.
+
 ## Configuración
 
 Orden del merge (las claves posteriores ganan; los objetos se combinan y los arrays se reemplazan):
