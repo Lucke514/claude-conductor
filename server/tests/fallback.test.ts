@@ -16,7 +16,7 @@ function setup(script: Record<ProviderName, ProviderResult[]>, cfgOverrides: Rec
   const config = parseConfig({ retry: { maxRetries: 2, baseDelayMs: 10 }, ...cfgOverrides });
   const breaker = new CircuitBreaker({ threshold: 10, cooldownMs: 1000 });
   const calls: string[] = [];
-  const sleep = vi.fn(async () => undefined);
+  const sleep = vi.fn(async (_ms: number) => undefined);
   const deps = {
     adapters: { codex: fakeAdapter("codex"), antigravity: fakeAdapter("antigravity") },
     breaker,
