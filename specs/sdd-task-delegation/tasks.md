@@ -77,7 +77,7 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 ## T7 — Slash command `/sdd-delegate`
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C6 · **Implements**: R10
 - **Files**: `commands/sdd-delegate.md`, `skills/multi-provider/SKILL.md`
 - **Do**: Escribir el comando con el flujo claim → commit (sin trailers) → delegate → presentación → apply + commit `sdd-task-delegation: T# …` tras el OK del usuario, o discard + release + commit del handback; defaults `auto` y write, `--read` opcional. Mencionar el flujo en la skill.
