@@ -142,4 +142,4 @@ Dead-code sweep: none — every new export reached by `server/src/index.ts` (too
 Excluded from inventory: none
 Documentation: `docs/sdd-task-delegation.md` (with Operating → Signal) and README sections match the schemas in `server/src/index.ts`
 Success criteria: SC1 pending — needs a real `/sdd-delegate` run with `codex` or `agy` installed · SC2 met on emission — `sdd-task-delegation.spec.ts::"R6/SC2…"` and `sdd-claim.spec.ts::"E10/SC2…"`; this feature's own history shows `sdd-task-delegation: claim T#` before each `T#` commit
-Integration: not opened yet
+Integration: pending review (Lucke514/claude-conductor#8)
