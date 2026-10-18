@@ -2,9 +2,9 @@ import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { formatDoctor, mcpConfigCheck, runDoctor, type DoctorReport } from "../src/doctor.js";
+import { formatDoctor, mcpConfigCheck, runDoctor, workspaceChecks, type DoctorReport } from "../src/doctor.js";
 import { StateStore } from "../src/state.js";
-import { FAKE_AGY, FAKE_CODEX, tmpDir } from "./helpers.js";
+import { FAKE_AGY, FAKE_CODEX, makeRepo, makeWorkspace, tmpDir } from "./helpers.js";
 
 function project(config: unknown = { providers: { codex: { binaryPath: FAKE_CODEX }, antigravity: { binaryPath: FAKE_AGY, usePty: false } } }): string {
   const dir = tmpDir("mp-doctor-proj-");
@@ -91,6 +91,36 @@ describe("doctor", () => {
     expect(text).toContain("✗ codex: live run");
     expect(text).toContain("fix: codex login");
     expect(text).toMatch(/some checks failed$/);
+  });
+});
+
+describe("nested-repos R12: workspace checks", () => {
+  const isolation = (readMode: "cwd" | "worktree", allowCwdWithSecrets = false) => ({ isolation: { readMode, includeUncommitted: true, symlink: [], symlinkByRepo: {}, allowCwdWithSecrets } });
+
+  it("SC9: lists nested repos and spec worktrees, flags the ones with .env, and warns on readMode cwd", async () => {
+    const { root } = makeWorkspace();
+    const specWt = path.join(root, ".claude", "worktrees", "demo", "web-app");
+    mkdirSync(specWt, { recursive: true });
+    makeRepo(specWt);
+    let [repos, read] = await workspaceChecks(root, isolation("cwd"));
+    expect(repos).toMatchObject({ name: "workspace repos", level: "ok" });
+    expect(repos!.detail).toContain("backend-monolith (.env)");
+    expect(repos!.detail).toContain(".claude/worktrees/demo/web-app");
+    expect(repos!.detail).not.toContain("web-app (.env)");
+    expect(read).toMatchObject({ name: "read isolation", level: "warn", fix: expect.stringContaining('readMode: "worktree"') });
+    expect(read!.detail).toContain("backend-monolith/.env");
+    expect(read!.detail).toContain("UNSAFE_READ_MODE");
+    [, read] = await workspaceChecks(root, isolation("worktree"));
+    expect(read).toMatchObject({ level: "ok", detail: expect.stringContaining("Residual") });
+  });
+
+  it("without nested repos the check is skipped, and runDoctor includes both checks", async () => {
+    const [repos, read] = await workspaceChecks(makeRepo(), isolation("cwd"));
+    expect(repos?.level).toBe("skip");
+    expect(read).toMatchObject({ level: "ok", detail: expect.stringContaining("no .env") });
+    const r = await runDoctor({ projectDir: project(), store: new StateStore(), live: false });
+    expect(check(r, "workspace repos")?.level).toBe("skip");
+    expect(check(r, "read isolation")?.level).toBe("ok");
   });
 });
 

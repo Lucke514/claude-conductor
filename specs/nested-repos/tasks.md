@@ -164,8 +164,8 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
 
 ## T8 — `/mp-doctor`: repos anidados y aislamiento de lectura
 
-- [ ] Open
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C8 · **Implements**: R12
 - **Files**: `server/src/doctor.ts`, `server/tests/doctor.spec.ts`
 - **Do**:
@@ -178,11 +178,12 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
   - sin repos anidados, el check queda `ok` o `skip` sin ruido;
   - los tests existentes siguen pasando.
 - **Verify**: `npm --prefix server test -- doctor`
+- **Notes**: Hecha por Claude. `workspaceChecks(projectDir, config)` en `doctor.ts` (lo llama `runDoctor` después del check de `.mcp.json`) añade `workspace repos` (repos de primer nivel y de `.claude/worktrees/<slug>/`, marcando `(.env)` con `scanSecrets`) y `read isolation` (`cwd` con `.env*` → `warn` con fix; `worktree` → `ok` con el riesgo residual de Q1). `antigravity: flags` también comprueba `--mode … plan` cuando `readModeArgs` no está fijado; el `--help` de `fake-agy.mjs` gana esa línea (copiada del formato real de agy 1.4.2). Tests: 2 en `doctor.spec.ts` (SC9, sin repos más `runDoctor`). Gates: typecheck 0 errores, 308 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: none
 
 ## T9 — Documentación
 
 - [ ] Open
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C8 · **Implements**: R1–R12 (documentación), R3 (riesgo residual)
 - **Files**: `README.md`, `docs/nested-repos.md`, `skills/multi-provider/SKILL.md`, `commands/delegate.md`, `commands/sdd-delegate.md`, `agents/codex-worker.md`, `agents/agy-worker.md`
 - **Do**:
