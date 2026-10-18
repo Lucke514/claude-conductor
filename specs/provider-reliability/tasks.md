@@ -84,8 +84,8 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 
 ## T4 — Trabajos con estado: `delegation_status` y `delegation_cancel`
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C6 · **Implements**: R8, E4, E5, E6
 - **Files**: `server/src/jobs.ts`, `server/src/delegate.ts`, `server/src/state.ts`, `server/src/index.ts`, `hooks/conductor/card.tsx`, `hooks/conductor/model.ts`, `types/index.d.ts`, `server/tests/jobs.spec.ts`, `tests/conductor-card.test.tsx`
 - **Do**:
@@ -102,12 +102,12 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
   - una línea de 1 000 caracteres queda en 200 y el texto del prompt no aparece en `progress` (E6);
   - el test de la card muestra el trabajo leído de `state.json`.
 - **Verify**: `npm --prefix server test -- jobs` · `claude plugin test .`
-- **Notes**: —
+- **Notes**: Hecha por Claude. `server/src/jobs.ts` (`JobRegistry`: `start` une el `AbortController` a la señal MCP; `progress` guarda 20 líneas de ≤ 200 caracteres; `status` calcula en vivo los archivos cambiados con `changedFiles`, nuevo y de solo lectura en `worktree.ts`; `cancel` es idempotente; `reconcile` marca `lost` y guarda los 10 últimos). `delegate()` registra el trabajo, conecta `onProgress` y el worktree de cada intento, y lo quita al terminar. `state.json → jobs` se reescribe como máximo una vez por segundo por progreso. Herramientas `delegation_status` (`readOnlyHint`, también permitida en `.claude/settings.json`) y `delegation_cancel`. La card toma la delegación en curso de `state.json → jobs` con `runningFromJobs` (proveedor real, tarea y último progreso); el hook `tool.call` queda de respaldo. Tests: 4 en `jobs.spec.ts` y 1 en `conductor-card.test.tsx`. Gates: typecheck 0 errores, 255 passed, plugin validate ok, plugin test 12 pass. Clean-code: el cuerpo de `delegate()` pasó a `run()` para que `finish(id)` corra siempre en `finally` · close calls: `delegation_status` hace `git diff`/`ls-files` por trabajo en cada llamada — se queda: es de solo lectura y hay como mucho un par de trabajos
 
 ## T5 — Timeouts separados, diff parcial y campos de config
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C3 · **Implements**: R4, R5
 - **Files**: `server/src/config.ts`, `server/src/fallback.ts`, `server/src/delegate.ts`, `config/multiprovider.example.json`, `server/tests/config.spec.ts`, `server/tests/delegate.spec.ts`, `server/tests/fixtures/fake-codex.mjs`
 - **Do**:

@@ -23,6 +23,7 @@ import {
   parseVerdict,
   pickActiveSpec,
   pipelineView,
+  runningFromJobs,
   prettyModel,
   rateLimitText,
   rateLimitView,
@@ -313,10 +314,12 @@ async function setPlacement($: EngineInterface, where: Placement): Promise<void>
 async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pane'>): Promise<RenderElement | undefined> {
   const state = await read($, snap)
   if (!state) return undefined
+  // The server's job registry knows the real worker and its progress; the tool.call hook is the fallback.
+  const live = runningFromJobs(state) ?? (await read($, running))
   const view = buildCard({
     state,
     now: await $.clock.now(),
-    running: await read($, running),
+    running: live,
     verdicts: await read($, verdicts),
     session: await read($, session),
     tick: await read($, tick),
@@ -324,7 +327,7 @@ async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pa
   const m: SessionMeta = await read($, meta)
   const specView: SpecView | null = await read($, spec)
   const active = specView && 'progress' in specView ? specView.progress : null
-  const pipeline = specView && 'features' in specView ? pipelineView(specView.features, await read($, running)) : []
+  const pipeline = specView && 'features' in specView ? pipelineView(specView.features, live) : []
   const wasCleaned: Cleaned | null = await read($, cleaned)
   const { Box, Text, Button } = $.ui.resolve(e)
   const wide = e.props.bodyColumns >= 100
@@ -522,7 +525,7 @@ export const register: Register = on => {
       const s = await read($, snap)
       const now = await $.clock.now()
       const counting = Object.values(s?.providers ?? {}).some(p => (p?.breaker?.cooldownUntil ?? 0) > now)
-      if ((await read($, running)) || counting) await update($, tick, t => t + 1)
+      if ((await read($, running)) || runningFromJobs(s) || counting) await update($, tick, t => t + 1)
     })
 
     try {

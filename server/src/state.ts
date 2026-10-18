@@ -1,5 +1,6 @@
 import { statePath } from "./paths.js";
 import { readJson, withLock, writeFileAtomic } from "./fsutil.js";
+import type { JobSnapshot } from "./jobs.js";
 import { isAttributable, type AuthState, type ErrorType, type ProviderName, type TokenUsage } from "./providers/types.js";
 
 /**
@@ -84,6 +85,8 @@ export interface MpState {
   /** Keyed by Claude Code session_id when known, else by MCP server instance id. */
   sessions: Record<string, SessionMetrics>;
   recent?: RecentDelegation[];
+  /** Delegations in flight (and recently lost ones), mirrored by the JobRegistry. */
+  jobs?: JobSnapshot[];
 }
 
 const MAX_SESSIONS = 30;

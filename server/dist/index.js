@@ -9,6 +9,7 @@ import { SddError } from "./sdd/artifacts.js";
 import { sddFeatureStatus } from "./sdd/pipeline.js";
 import { sddTaskClaim, sddTaskDelegate, sddTaskRelease } from "./sdd/task-delegation.js";
 import { checkHealth } from "./health.js";
+import { JobRegistry } from "./jobs.js";
 import { StateStore } from "./state.js";
 import { applyWorktree, cleanupWorktrees, readMeta, removeWorktree } from "./worktree.js";
 const VERSION = "0.2.0";
@@ -30,6 +31,9 @@ const fail = (err) => ({
 export function createServer() {
     const instanceId = `mcp-${process.pid}-${randomBytes(3).toString("hex")}`;
     const store = new StateStore();
+    const jobs = new JobRegistry(store);
+    // E5: jobs a previous server left running in state.json are marked lost.
+    void jobs.reconcile();
     const server = new McpServer({ name: "multi-provider", version: VERSION });
     server.registerTool("delegate", {
         title: "Delegate a task to another AI CLI",
@@ -53,7 +57,7 @@ export function createServer() {
         try {
             const dir = projectDir();
             const { config } = await loadConfig(dir);
-            return json(await delegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal }));
+            return json(await delegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs }));
         }
         catch (err) {
             return fail(err);
@@ -115,6 +119,35 @@ export function createServer() {
             return fail(err);
         }
     });
+    server.registerTool("delegation_status", {
+        title: "Delegations in progress",
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        description: "Read-only. The delegations this server is running (or one by id): provider, mode, phase, elapsed time, the worker's last progress lines " +
+            "(its own output, trimmed; never the prompt) and files changed so far. Also lists jobs lost when a previous server stopped (phase: lost). " +
+            "Use it while a long delegate / sdd_task_delegate call runs in the background.",
+        inputSchema: { id: z.string().min(1).optional().describe("Delegation id; omit for all") },
+    }, async ({ id }) => {
+        try {
+            const lost = ((await store.read()).jobs ?? []).filter((j) => j.phase === "lost" && (!id || j.id === id));
+            return json({ jobs: await jobs.status(id), ...(lost.length ? { lost } : {}) });
+        }
+        catch (err) {
+            return fail(err);
+        }
+    });
+    server.registerTool("delegation_cancel", {
+        title: "Cancel a delegation",
+        description: "Stops a running delegation: kills the worker's process tree, tries no other provider and leaves the circuit breaker alone. " +
+            "Changes the worker already made stay in its worktree (the delegate call returns status cancelled with the diff).",
+        inputSchema: { id: z.string().min(1).describe("Delegation id (from delegation_status)") },
+    }, async ({ id }) => {
+        try {
+            return json(jobs.cancel(id));
+        }
+        catch (err) {
+            return fail(err);
+        }
+    });
     server.registerTool("delegation_cleanup", {
         title: "Clean up stale delegations",
         description: "Remove leftover mp/* worktrees and branches of the current repository.",
@@ -167,7 +200,7 @@ export function createServer() {
         try {
             const dir = projectDir();
             const { config } = await loadConfig(dir);
-            return json(await sddTaskDelegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal }));
+            return json(await sddTaskDelegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs }));
         }
         catch (err) {
             return fail(err);

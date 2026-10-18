@@ -29,6 +29,18 @@ export interface StateFile {
   chain?: string[];
   providers?: Partial<Record<ProviderName, ProviderStateFile>>;
   recent?: RecentFile[];
+  jobs?: JobFile[];
+}
+/** A delegation in flight, as the server's JobRegistry mirrors it. */
+export interface JobFile {
+  id: string;
+  provider: string | null;
+  mode: string;
+  task: string;
+  sdd?: { slug: string; taskId: string };
+  phase: string;
+  startedAt: string;
+  lastProgress?: string;
 }
 export interface ProviderStateFile {
   health?: { installed?: boolean; enabled?: boolean; auth?: string; version?: string };
@@ -467,6 +479,20 @@ export function pipelineView(features: PipelineFeature[], running?: Running | nu
       const slug = f.slug.length > room ? `${f.slug.slice(0, room - 1)}…` : f.slug;
       return { slug: f.slug, text: `${slug} ${rest}`, running: !!live, warn: f.warnings > 0 };
     });
+}
+
+/** The delegation the server reports as running, for the card's "tocando" state and its hint line. */
+export function runningFromJobs(state: StateFile | null | undefined): Running | null {
+  const j = (state?.jobs ?? []).find((x) => x.phase === "running" || x.phase === "cancelled");
+  if (!j) return null;
+  const started = Date.parse(j.startedAt);
+  return {
+    provider: j.provider ?? "auto",
+    mode: j.mode,
+    task: (j.lastProgress ? `${j.task} — ${j.lastProgress}` : j.task).slice(0, 70),
+    startedAt: Number.isFinite(started) ? started : 0,
+    ...(j.sdd ? { slug: j.sdd.slug, taskId: j.sdd.taskId } : {}),
+  };
 }
 
 /** The worker a task's Owner names ("codex (multi-provider) since …" → "codex"). */
