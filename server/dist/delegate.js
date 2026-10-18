@@ -9,6 +9,15 @@ import { recordCall, recordRecent, taskLabel } from "./state.js";
 import { checkRemotePush } from "./remote-check.js";
 import { ensureShims, workerEnv } from "./worker-env.js";
 import { collectChanges, createWorktree, removeWorktree } from "./worktree.js";
+const normPath = (p) => p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+/** Changed files not covered by the task's Files (exact path, or under an entry ending in `/`). */
+export function outsideScope(changed, scope) {
+    const entries = scope.map(normPath).filter(Boolean);
+    return changed.filter((f) => {
+        const file = normPath(f);
+        return !entries.some((e) => (e.endsWith("/") ? file.startsWith(e) : file === e));
+    });
+}
 export async function delegate(params, ctx) {
     const started = Date.now();
     const id = `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomBytes(3).toString("hex")}`;
@@ -89,6 +98,16 @@ export async function delegate(params, ctx) {
                     type: "write_in_read_mode",
                     detail: `${provider} modified ${changes.files.length} file(s) in read mode; changes were discarded: ${changes.files.slice(0, 10).join(", ")}`,
                 });
+            }
+            if (params.scopeFiles && mode === "write" && changes.files.length > 0) {
+                const outside = outsideScope(changes.files, params.scopeFiles);
+                if (outside.length > 0) {
+                    violations.push({
+                        type: "outside_task_files",
+                        detail: `${provider} changed ${outside.length} file(s) outside the task's Files: ${outside.slice(0, 10).join(", ")}`,
+                        files: outside,
+                    });
+                }
             }
             if (mode === "write" && result.ok && changes.files.length > 0) {
                 kept = { meta, changes };

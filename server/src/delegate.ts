@@ -20,6 +20,8 @@ export interface DelegateParams {
   model?: string;
   taskType?: string;
   fallback?: boolean;
+  /** Files the task may change (an entry ending in `/` covers a directory); anything else is reported as drift. */
+  scopeFiles?: string[];
   /** Extra "Expected output" lines for the worker (e.g. the SDD Acceptance section). */
   extraOutput?: string[];
   /** Claude Code session id (injected by the PreToolUse hook). */
@@ -46,10 +48,27 @@ export interface DelegateResponse {
   usage?: TokenUsage;
   routing?: { rule: string; provider: ProviderName };
   files: FileReport[];
-  violations?: (Violation | PushViolation | { type: "write_in_read_mode"; detail: string })[];
+  violations?: (Violation | PushViolation | ScopeViolation | { type: "write_in_read_mode"; detail: string })[];
   summary?: string;
   notes?: string[];
   nextSteps: string[];
+}
+
+export interface ScopeViolation {
+  type: "outside_task_files";
+  detail: string;
+  files: string[];
+}
+
+const normPath = (p: string): string => p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+
+/** Changed files not covered by the task's Files (exact path, or under an entry ending in `/`). */
+export function outsideScope(changed: string[], scope: string[]): string[] {
+  const entries = scope.map(normPath).filter(Boolean);
+  return changed.filter((f) => {
+    const file = normPath(f);
+    return !entries.some((e) => (e.endsWith("/") ? file.startsWith(e) : file === e));
+  });
 }
 
 export interface DelegateContext {
@@ -145,6 +164,16 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
           type: "write_in_read_mode",
           detail: `${provider} modified ${changes.files.length} file(s) in read mode; changes were discarded: ${changes.files.slice(0, 10).join(", ")}`,
         });
+      }
+      if (params.scopeFiles && mode === "write" && changes.files.length > 0) {
+        const outside = outsideScope(changes.files, params.scopeFiles);
+        if (outside.length > 0) {
+          violations.push({
+            type: "outside_task_files",
+            detail: `${provider} changed ${outside.length} file(s) outside the task's Files: ${outside.slice(0, 10).join(", ")}`,
+            files: outside,
+          });
+        }
       }
       if (mode === "write" && result.ok && changes.files.length > 0) {
         kept = { meta, changes };

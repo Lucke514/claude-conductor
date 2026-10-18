@@ -68,8 +68,8 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 
 ## T4 — Drift fuera de los `Files` de la tarea
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C4 · **Implements**: R7, E3, E4
 - **Files**: `server/src/delegate.ts`, `server/src/sdd/task-delegation.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/guardrails.spec.ts`
 - **Do**: añadir `DelegateParams.scopeFiles` y la violación `outside_task_files`; `sddTaskDelegate` pasa `task.files`, expone `sdd.drift` y fuerza `verified: false`.
@@ -79,7 +79,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
   - `src/` cubre `src/x/y.ts`.
   - `delegate` sin `scopeFiles` no cambia.
 - **Verify**: `npm --prefix server test -- sdd-task-delegation guardrails`
-- **Notes**: —
+- **Notes**: `DelegateParams.scopeFiles`, `outsideScope` y la violación `outside_task_files` en `server/src/delegate.ts`; `sdd.drift`, `verified: false` y el paso "SPEC DRIFT" en `server/src/sdd/task-delegation.ts`; 1 caso en `sdd-task-delegation.spec.ts` y 2 en `guardrails.spec.ts`; commit `sdd-guardrails: T4 report drift outside task Files`. Gates: typecheck 0 errores, 193 passed. Clean-code: none · close calls: none
 
 ## T5 — Delegación automática y confirmación en repos SDD
 

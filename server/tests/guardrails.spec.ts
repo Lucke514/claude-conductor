@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { delegate } from "../src/delegate.js";
+import { delegate, outsideScope } from "../src/delegate.js";
 import { StateStore } from "../src/state.js";
 import { CREDENTIAL_ENV, GH_SHIM_MESSAGE, pathKey, shimDir, workerEnv } from "../src/worker-env.js";
 import { applyWorktree, removeWorktree, readMeta } from "../src/worktree.js";
@@ -160,5 +160,19 @@ describe("remote push check (R6, E6, E7)", () => {
     expect(r.notes?.some((n) => n.startsWith("push check skipped: origin:"))).toBe(true);
     const { r: none } = await probe(makeRepo());
     expect(none.notes?.some((n) => n.startsWith("push check")) ?? false).toBe(false);
+  });
+});
+
+describe("task scope (R7, E4)", () => {
+  it("a directory entry covers its subtree; paths are normalized", () => {
+    expect(outsideScope(["src/x/y.ts", "src2/z.ts", "docs/a.md", "README.md"], ["src/", "./docs/a.md", " README.md "])).toEqual(["src2/z.ts"]);
+    expect(outsideScope(["a\\b.ts"], ["a/b.ts"])).toEqual([]);
+  });
+
+  it("plain delegate without scopeFiles reports no drift", async () => {
+    process.env.FAKE_WRITE_FILE = "anything.txt";
+    const { r } = await probe(makeRepo());
+    expect(r.violations ?? []).toEqual([]);
+    await removeWorktree(await readMeta(r.worktreePath!));
   });
 });
