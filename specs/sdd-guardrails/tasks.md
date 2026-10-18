@@ -54,7 +54,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 ## T3 — Comprobación de push al remoto
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C3 · **Implements**: R6, E6, E7
 - **Files**: `server/src/remote-check.ts`, `server/src/delegate.ts`, `server/src/config.ts`, `config/multiprovider.example.json`, `server/tests/guardrails.spec.ts`
 - **Do**: implementar `checkRemotePush` con `runProcess`, timeout de 10 s y `GIT_TERMINAL_PROMPT=0`; llamarlo en `execute` tras `collectChanges`; añadir `guardrails.checkRemotePush` (por defecto `true`) a la config y al ejemplo; añadir el paso con `git push <remote> --delete <branch>` cuando haya `worker_push`.
