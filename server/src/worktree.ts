@@ -124,16 +124,21 @@ export async function createWorktree(opts: {
   return meta;
 }
 
-/** Env forcing our hooks for every git process the worker starts (git >= 2.31). */
-export function workerGitEnv(meta: WorktreeMeta, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  // Append to any GIT_CONFIG_* entries already present instead of clobbering them.
+/** `GIT_CONFIG_*` entries appended after any already present in env (git >= 2.31). */
+export function gitConfigEnv(entries: [string, string][], env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const n = Number.parseInt(env.GIT_CONFIG_COUNT ?? "0", 10);
-  const i = Number.isFinite(n) && n > 0 ? n : 0;
-  return {
-    GIT_CONFIG_COUNT: String(i + 1),
-    [`GIT_CONFIG_KEY_${i}`]: "core.hooksPath",
-    [`GIT_CONFIG_VALUE_${i}`]: meta.hooksDir,
-  };
+  const start = Number.isFinite(n) && n > 0 ? n : 0;
+  const out: Record<string, string> = { GIT_CONFIG_COUNT: String(start + entries.length) };
+  entries.forEach(([key, value], j) => {
+    out[`GIT_CONFIG_KEY_${start + j}`] = key;
+    out[`GIT_CONFIG_VALUE_${start + j}`] = value;
+  });
+  return out;
+}
+
+/** Env forcing our hooks for every git process the worker starts. */
+export function workerGitEnv(meta: WorktreeMeta, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  return gitConfigEnv([["core.hooksPath", meta.hooksDir]], env);
 }
 
 export async function readMeta(worktreePath: string): Promise<WorktreeMeta> {

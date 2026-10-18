@@ -6,7 +6,8 @@ import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt } from "./prompt-builder.js";
 import { PROVIDER_NAMES } from "./providers/types.js";
 import { recordCall, recordRecent, taskLabel } from "./state.js";
-import { collectChanges, createWorktree, removeWorktree, workerGitEnv } from "./worktree.js";
+import { ensureShims, workerEnv } from "./worker-env.js";
+import { collectChanges, createWorktree, removeWorktree } from "./worktree.js";
 export async function delegate(params, ctx) {
     const started = Date.now();
     const id = `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomBytes(3).toString("hex")}`;
@@ -46,6 +47,7 @@ export async function delegate(params, ctx) {
             summary: "write mode requires a git repository (changes are isolated in a git worktree)",
         });
     }
+    await ensureShims();
     const execute = async (provider, adapter) => {
         let meta;
         if (isolate && repoRoot) {
@@ -65,7 +67,7 @@ export async function delegate(params, ctx) {
                 mode,
                 timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
                 ...(model ? { model } : {}),
-                env: meta ? workerGitEnv(meta) : {},
+                env: workerEnv(meta),
             });
         }
         catch (err) {

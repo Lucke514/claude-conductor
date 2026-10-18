@@ -7,7 +7,8 @@ import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
 import { PROVIDER_NAMES, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
 import { recordCall, recordRecent, taskLabel, type StateStore } from "./state.js";
-import { collectChanges, createWorktree, removeWorktree, workerGitEnv, type Changes, type Violation, type WorktreeMeta } from "./worktree.js";
+import { ensureShims, workerEnv } from "./worker-env.js";
+import { collectChanges, createWorktree, removeWorktree, type Changes, type Violation, type WorktreeMeta } from "./worktree.js";
 
 export interface DelegateParams {
   provider: ProviderName | "auto";
@@ -104,6 +105,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     });
   }
 
+  await ensureShims();
   const execute = async (provider: ProviderName, adapter: ProviderAdapter): Promise<ProviderResult> => {
     let meta: WorktreeMeta | undefined;
     if (isolate && repoRoot) {
@@ -123,7 +125,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
         mode,
         timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
         ...(model ? { model } : {}),
-        env: meta ? workerGitEnv(meta) : {},
+        env: workerEnv(meta),
       });
     } catch (err) {
       result = { ok: false, output: "", exitCode: null, durationMs: 0, error: { type: "NON_ZERO_EXIT", message: (err as Error).message } };

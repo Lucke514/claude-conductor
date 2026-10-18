@@ -16,8 +16,8 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 
 ## T1 — Entorno sellado del worker
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C1 · **Implements**: R4, R5, E5, E8, E9
 - **Files**: `server/src/worker-env.ts`, `server/src/worktree.ts`, `server/src/delegate.ts`, `server/tests/fixtures/fake-codex.mjs`, `server/tests/guardrails.spec.ts`
 - **Do**:
@@ -34,7 +34,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
   - `gh.cmd` existe y la clave de PATH se detecta sin distinguir mayúsculas.
   - El valor de `GH_TOKEN` no aparece en la respuesta.
 - **Verify**: `npm --prefix server test -- guardrails delegate`
-- **Notes**: —
+- **Notes**: `server/src/worker-env.ts` (`workerEnv`, `ensureShims`, `pathKey`, `CREDENTIAL_ENV`), `gitConfigEnv` en `server/src/worktree.ts`, `workerEnv` en `delegate.ts` también sin worktree, `env` admite `undefined` en `providers/types.ts`, modo `probe` en el CLI falso y `server/tests/guardrails.spec.ts` (4 casos); commit `sdd-guardrails: T1 sealed worker environment`. Gates: typecheck 0 errores, 185 passed. Clean-code: none · close calls: el mensaje del `gh` falso va en ASCII (sin raya larga) para que `cmd.exe` lo muestre igual en Windows
 
 ## T2 — `specs/` intocable
 

@@ -72,16 +72,20 @@ export async function createWorktree(opts) {
     await fs.writeFile(path.join(gitDir, META_FILE), JSON.stringify(meta, null, 2));
     return meta;
 }
-/** Env forcing our hooks for every git process the worker starts (git >= 2.31). */
-export function workerGitEnv(meta, env = process.env) {
-    // Append to any GIT_CONFIG_* entries already present instead of clobbering them.
+/** `GIT_CONFIG_*` entries appended after any already present in env (git >= 2.31). */
+export function gitConfigEnv(entries, env = process.env) {
     const n = Number.parseInt(env.GIT_CONFIG_COUNT ?? "0", 10);
-    const i = Number.isFinite(n) && n > 0 ? n : 0;
-    return {
-        GIT_CONFIG_COUNT: String(i + 1),
-        [`GIT_CONFIG_KEY_${i}`]: "core.hooksPath",
-        [`GIT_CONFIG_VALUE_${i}`]: meta.hooksDir,
-    };
+    const start = Number.isFinite(n) && n > 0 ? n : 0;
+    const out = { GIT_CONFIG_COUNT: String(start + entries.length) };
+    entries.forEach(([key, value], j) => {
+        out[`GIT_CONFIG_KEY_${start + j}`] = key;
+        out[`GIT_CONFIG_VALUE_${start + j}`] = value;
+    });
+    return out;
+}
+/** Env forcing our hooks for every git process the worker starts. */
+export function workerGitEnv(meta, env = process.env) {
+    return gitConfigEnv([["core.hooksPath", meta.hooksDir]], env);
 }
 export async function readMeta(worktreePath) {
     assertManagedPath(worktreePath);
