@@ -88,7 +88,7 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 ## T8 — Document the feature
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: — · **Implements**: all (documentation)
 - **Files**: `docs/sdd-task-delegation.md`, `README.md`
 - **Do**: Escribir `docs/sdd-task-delegation.md` (flujo, herramientas, respuesta, límites: E3, comparación con baseline, Owner con fallback); sección en el README con `/sdd-delegate` y las tres herramientas.
