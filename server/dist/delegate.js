@@ -6,7 +6,18 @@ import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt } from "./prompt-builder.js";
 import { PROVIDER_NAMES } from "./providers/types.js";
 import { recordCall, recordRecent, taskLabel } from "./state.js";
-import { collectChanges, createWorktree, removeWorktree, workerGitEnv } from "./worktree.js";
+import { checkRemotePush } from "./remote-check.js";
+import { ensureShims, workerEnv } from "./worker-env.js";
+import { collectChanges, createWorktree, removeWorktree } from "./worktree.js";
+const normPath = (p) => p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+/** Changed files not covered by the task's Files (exact path, or under an entry ending in `/`). */
+export function outsideScope(changed, scope) {
+    const entries = scope.map(normPath).filter(Boolean);
+    return changed.filter((f) => {
+        const file = normPath(f);
+        return !entries.some((e) => (e.endsWith("/") ? file.startsWith(e) : file === e));
+    });
+}
 export async function delegate(params, ctx) {
     const started = Date.now();
     const id = `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomBytes(3).toString("hex")}`;
@@ -46,6 +57,7 @@ export async function delegate(params, ctx) {
             summary: "write mode requires a git repository (changes are isolated in a git worktree)",
         });
     }
+    await ensureShims();
     const execute = async (provider, adapter) => {
         let meta;
         if (isolate && repoRoot) {
@@ -65,7 +77,7 @@ export async function delegate(params, ctx) {
                 mode,
                 timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
                 ...(model ? { model } : {}),
-                env: meta ? workerGitEnv(meta) : {},
+                env: workerEnv(meta),
             });
         }
         catch (err) {
@@ -76,11 +88,26 @@ export async function delegate(params, ctx) {
         if (meta) {
             const changes = await collectChanges(meta, config.defaults.maxDiffBytes, `${id}-${provider}`);
             violations.push(...changes.violations);
+            if (config.guardrails.checkRemotePush) {
+                const pushed = await checkRemotePush(meta.repoRoot, meta.branch);
+                violations.push(...pushed.violations);
+                notes.push(...pushed.notes);
+            }
             if (mode === "read" && changes.files.length > 0) {
                 violations.push({
                     type: "write_in_read_mode",
                     detail: `${provider} modified ${changes.files.length} file(s) in read mode; changes were discarded: ${changes.files.slice(0, 10).join(", ")}`,
                 });
+            }
+            if (params.scopeFiles && mode === "write" && changes.files.length > 0) {
+                const outside = outsideScope(changes.files, params.scopeFiles);
+                if (outside.length > 0) {
+                    violations.push({
+                        type: "outside_task_files",
+                        detail: `${provider} changed ${outside.length} file(s) outside the task's Files: ${outside.slice(0, 10).join(", ")}`,
+                        files: outside,
+                    });
+                }
             }
             if (mode === "write" && result.ok && changes.files.length > 0) {
                 kept = { meta, changes };
@@ -202,6 +229,10 @@ function nextSteps(r) {
     const steps = ["Verify the worker's claims against the real code before using them — never accept unverified output."];
     if (r.worktreePath) {
         steps.push(`Review the diff and run lint/tests inside ${r.worktreePath}.`, "Accept: call `delegation_apply` with the worktreePath (git apply --3way onto the user's branch, no commit), then commit yourself.", "Reject: call `delegation_discard` with the worktreePath. mp/* branches are never merged.");
+    }
+    for (const v of r.violations ?? []) {
+        if (v.type === "worker_push")
+            steps.push(`A worker pushed ${v.branch} to '${v.remote}'. Tell the user and, with their OK, delete it: \`git push ${v.remote} --delete ${v.branch}\`.`);
     }
     if (r.violations?.length)
         steps.push("Violations were recorded (see `violations`); treat this result with extra suspicion.");

@@ -26,12 +26,9 @@ export interface WorktreeMeta {
   symlinks: string[];
 }
 
-export interface Violation {
-  type: "worker_commit";
-  detail: string;
-  headBefore: string;
-  headAfter: string;
-}
+export type Violation =
+  | { type: "worker_commit"; detail: string; headBefore: string; headAfter: string }
+  | { type: "specs_modified"; detail: string; files: string[] };
 
 export interface Changes {
   diff: string;
@@ -124,16 +121,16 @@ export async function createWorktree(opts: {
   return meta;
 }
 
-/** Env forcing our hooks for every git process the worker starts (git >= 2.31). */
-export function workerGitEnv(meta: WorktreeMeta, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  // Append to any GIT_CONFIG_* entries already present instead of clobbering them.
+/** `GIT_CONFIG_*` entries appended after any already present in env (git >= 2.31). */
+export function gitConfigEnv(entries: [string, string][], env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const n = Number.parseInt(env.GIT_CONFIG_COUNT ?? "0", 10);
-  const i = Number.isFinite(n) && n > 0 ? n : 0;
-  return {
-    GIT_CONFIG_COUNT: String(i + 1),
-    [`GIT_CONFIG_KEY_${i}`]: "core.hooksPath",
-    [`GIT_CONFIG_VALUE_${i}`]: meta.hooksDir,
-  };
+  const start = Number.isFinite(n) && n > 0 ? n : 0;
+  const out: Record<string, string> = { GIT_CONFIG_COUNT: String(start + entries.length) };
+  entries.forEach(([key, value], j) => {
+    out[`GIT_CONFIG_KEY_${start + j}`] = key;
+    out[`GIT_CONFIG_VALUE_${start + j}`] = value;
+  });
+  return out;
 }
 
 export async function readMeta(worktreePath: string): Promise<WorktreeMeta> {
@@ -182,6 +179,14 @@ export async function collectChanges(meta: WorktreeMeta, maxDiffBytes: number, i
       headAfter,
     });
   }
+  const specs = await restoreSpecs(meta, noHooks);
+  if (specs.length > 0) {
+    violations.push({
+      type: "specs_modified",
+      detail: `worker changed ${specs.length} file(s) under specs/; they were restored and left out of the diff: ${specs.slice(0, 10).join(", ")}`,
+      files: specs,
+    });
+  }
   await gitOk([...noHooks, "add", "-A"], meta.path);
   if (meta.symlinks.length > 0) {
     await git([...noHooks, "reset", "-q", "--", ...meta.symlinks], meta.path);
@@ -206,6 +211,20 @@ export async function collectChanges(meta: WorktreeMeta, maxDiffBytes: number, i
     ...(patchFile ? { patchFile } : {}),
     violations,
   };
+}
+
+/** Put `specs/` back as it was at the base commit; returns the paths the worker had changed. */
+async function restoreSpecs(meta: WorktreeMeta, noHooks: string[]): Promise<string[]> {
+  const lines = async (args: string[]) => (await git(args, meta.path)).stdout.split(/\r?\n/).filter(Boolean);
+  const changed = new Set([
+    ...(await lines(["diff", "--name-only", meta.baseCommit, "--", "specs"])),
+    ...(await lines(["ls-files", "--others", "--exclude-standard", "--", "specs"])),
+  ]);
+  if (changed.size === 0) return [];
+  await git([...noHooks, "reset", "-q", meta.baseCommit, "--", "specs"], meta.path);
+  if ((await lines(["ls-files", "--", "specs"])).length > 0) await gitOk([...noHooks, "checkout", "--", "specs"], meta.path);
+  await gitOk([...noHooks, "clean", "-fdq", "--", "specs"], meta.path);
+  return [...changed].sort();
 }
 
 export async function removeWorktree(meta: Pick<WorktreeMeta, "repoRoot" | "path" | "branch">): Promise<void> {

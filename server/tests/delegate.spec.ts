@@ -204,11 +204,11 @@ describe("delegate (integration with fake CLIs)", () => {
   });
 });
 
-import { workerGitEnv } from "../src/worktree.js";
-describe("workerGitEnv", () => {
+import { gitConfigEnv } from "../src/worktree.js";
+describe("gitConfigEnv", () => {
   it("appends to existing GIT_CONFIG_* entries", () => {
-    const meta = { hooksDir: "/h" } as Parameters<typeof workerGitEnv>[0];
-    expect(workerGitEnv(meta, { GIT_CONFIG_COUNT: "3" })).toEqual({ GIT_CONFIG_COUNT: "4", GIT_CONFIG_KEY_3: "core.hooksPath", GIT_CONFIG_VALUE_3: "/h" });
-    expect(workerGitEnv(meta, {})).toEqual({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: "/h" });
+    const hooks: [string, string][] = [["core.hooksPath", "/h"]];
+    expect(gitConfigEnv(hooks, { GIT_CONFIG_COUNT: "3" })).toEqual({ GIT_CONFIG_COUNT: "4", GIT_CONFIG_KEY_3: "core.hooksPath", GIT_CONFIG_VALUE_3: "/h" });
+    expect(gitConfigEnv(hooks, {})).toEqual({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: "/h" });
   });
 });

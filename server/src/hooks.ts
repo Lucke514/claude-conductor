@@ -1,3 +1,5 @@
+import { existsSync, promises as fs } from "node:fs";
+import path from "node:path";
 import { loadConfig, type MpConfig } from "./config.js";
 import { scrubCommand } from "./gh-scrub.js";
 import { checkHealth } from "./health.js";
@@ -49,7 +51,9 @@ export async function preDelegate(input: HookInput): Promise<HookOutput> {
     out.permissionDecision = "ask";
     out.permissionDecisionReason =
       `multi-provider: '${String(toolInput.provider ?? (sdd ? `the worker claimed for ${String(toolInput.slug)}/${String(toolInput.task)}` : "auto"))}' will MODIFY files in an isolated git worktree ` +
-      `(branch mp/*). Nothing is merged automatically — you will review the diff. Allow?`;
+      `(branch mp/*). Nothing is merged automatically — you will review the diff.` +
+      (!sdd && (await isSddRepo(projectDirFrom(input))) ? ` ${SDD_DELEGATE_WARNING}` : "") +
+      " Allow?";
   }
   return { hookSpecificOutput: out };
 }
@@ -208,13 +212,33 @@ export const AUTO_DELEGATE_CONTEXT =
   "Do NOT delegate conversation, quick questions, tiny edits faster to do directly, plugin/config management, " +
   "or work that depends on context you cannot put in a brief.";
 
+export const SDD_AUTO_CONTEXT =
+  "This repository uses spec-driven development (specs/<slug>/spec.md). Implementation work is delegated only as an approved task: " +
+  "use /sdd-delegate (sdd_task_claim, commit the claim, then sdd_task_delegate) and never the `delegate` tool in write mode to implement. " +
+  "Work with no approved spec and tasks is not auto-delegated: propose writing the spec first. Read-mode `delegate` (reviews, analysis) is still fine.";
+
+export const SDD_DELEGATE_WARNING =
+  "This repo uses spec-driven development: this write delegation bypasses it — tasks from specs/<slug>/tasks.md go through /sdd-delegate.";
+
+/** A repo using spec-driven development: at least one specs/<slug>/spec.md. */
+export async function isSddRepo(dir: string): Promise<boolean> {
+  try {
+    const entries = await fs.readdir(path.join(dir, "specs"), { withFileTypes: true });
+    return entries.some((e) => e.isDirectory() && existsSync(path.join(dir, "specs", e.name, "spec.md")));
+  } catch {
+    return false;
+  }
+}
+
 /** UserPromptSubmit: when autoDelegate is on, tell Claude to delegate suitable requests by itself. */
 export async function userPromptSubmit(input: HookInput): Promise<HookOutput> {
   const prompt = (input.prompt ?? "").trim();
   if (!prompt || prompt.startsWith("/")) return undefined;
-  const config = await safeConfig(projectDirFrom(input));
+  const dir = projectDirFrom(input);
+  const config = await safeConfig(dir);
   if (!config?.autoDelegate.enabled) return undefined;
-  return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: AUTO_DELEGATE_CONTEXT } };
+  const context = (await isSddRepo(dir)) ? `${AUTO_DELEGATE_CONTEXT} ${SDD_AUTO_CONTEXT}` : AUTO_DELEGATE_CONTEXT;
+  return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } };
 }
 
 /** SessionStart: silent health check; only speaks when no provider is usable. */

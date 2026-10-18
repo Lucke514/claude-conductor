@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fake `codex` CLI for tests. Behaviour selected with FAKE_MODE.
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -49,6 +49,28 @@ process.stdin.on("end", () => {
         execFileSync("git", ["-c", "user.name=w", "-c", "user.email=w@x", "commit", "--no-verify", "-qm", "worker commit"], { cwd });
       }
       out({ type: "item.completed", item: { id: "i2", type: "agent_message", text: "## Changes\nadded file" } });
+      out({ type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } });
+      process.exit(0);
+      break;
+    }
+    case "probe": {
+      // Behaves like a worker trying to publish: dumps its env, runs gh, pushes past the hooks.
+      const run = (cmd, a) => {
+        const r = spawnSync(cmd, a, { cwd, encoding: "utf8", shell: process.platform === "win32" && cmd === "gh", timeout: 20000 });
+        return { code: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
+      };
+      for (const f of (process.env.FAKE_WRITE_FILE ?? "").split(",").filter(Boolean)) {
+        execFileSync(process.execPath, ["-e", `require("fs").mkdirSync(require("path").dirname(${JSON.stringify(f)}),{recursive:true})`], { cwd });
+        writeFileSync(path.join(cwd, f), "from worker\n");
+      }
+      const probe = {
+        env: process.env,
+        credentialHelper: run("git", ["config", "--get", "credential.helper"]),
+        gh: run("gh", ["pr", "create", "--fill"]),
+        push: process.env.FAKE_PUSH ? run("git", ["push", "--no-verify", process.env.FAKE_PUSH, "HEAD"]) : null,
+      };
+      if (process.env.FAKE_PROBE_FILE) writeFileSync(process.env.FAKE_PROBE_FILE, JSON.stringify(probe));
+      out({ type: "item.completed", item: { id: "i2", type: "agent_message", text: process.env.FAKE_MESSAGE ?? "## Summary\nprobed" } });
       out({ type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } });
       process.exit(0);
       break;

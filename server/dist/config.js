@@ -83,6 +83,12 @@ export const ConfigSchema = z.object({
         compose: z.string().optional(),
     })
         .prefault({}),
+    guardrails: z
+        .object({
+        /** After each delegation, look for its mp/* branch on the remotes (git ls-remote, 10 s timeout). */
+        checkRemotePush: z.boolean().default(true),
+    })
+        .prefault({}),
     autoDelegate: z
         .object({
         /** Inject a delegation instruction on every user prompt (toggled with /mp-auto). */

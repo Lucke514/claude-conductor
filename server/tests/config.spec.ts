@@ -17,6 +17,7 @@ describe("config validation", () => {
     expect(c.providers.codex).toMatchObject({ enabled: true, extraArgs: [], errorPatterns: {} });
     expect(c.statusline.mode).toBe("compact");
     expect(c.card.placement).toBe("side");
+    expect(c.guardrails.checkRemotePush).toBe(true);
   });
 
   it("rejects unknown providers in the chain", () => {

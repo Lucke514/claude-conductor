@@ -24,8 +24,8 @@ export interface ProviderRequest {
   mode: Mode;
   timeoutMs: number;
   model?: string;
-  /** Extra environment for the child (e.g. GIT_CONFIG_* to force worktree hooks). */
-  env?: Record<string, string>;
+  /** Extra environment for the child (e.g. GIT_CONFIG_* to force worktree hooks); `undefined` removes a variable. */
+  env?: Record<string, string | undefined>;
 }
 
 export interface TokenUsage {

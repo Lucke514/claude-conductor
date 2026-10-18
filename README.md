@@ -76,6 +76,7 @@ Ejemplo completo: [`config/multiprovider.example.json`](config/multiprovider.exa
 | `verify.commands` | `[]` | Ej. `["npm run lint","npm test"]`. Se ejecutan sin shell dentro del worktree (hook PostToolUse) |
 | `autoDelegate.enabled` | `true` | Delegación automática en cada mensaje (`/mp-auto on\|off`) |
 | `statusline.mode` | `"compact"` | `full` / `compact` / `off` |
+| `guardrails.checkRemotePush` | `true` | Tras cada delegación, busca la rama `mp/*` en los remotos (`git ls-remote`, 10 s) y la marca como `worker_push` si un worker la publicó |
 | `card.enabled` / `card.placement` | `true` / `"side"` | Conductor header; `side` = panel al lado de la conversación, `below` = banda sobre el prompt (`/conductor lado\|abajo`) |
 | `providers.<codex\|antigravity>` | | `enabled`, `binaryPath`, `model`, `extraArgs`, `usePty`, `errorPatterns`, `timeoutMs`, `modelFlag`, `readModeArgs`, `writeModeArgs`, `versionArgs`, `authCheckArgs`, `skipGitRepoCheck` (codex), `outputFormat` (agy: `text`/`json`) |
 
@@ -188,6 +189,13 @@ Claude verifica → ACCEPT: delegation_apply (git apply --3way) + commit propio 
   - Claude aplica el diff con `git apply --3way`. Si tienes cambios locales sin stagear en esos archivos, se reintenta sin `--3way`.
   - Claude hace el commit con **tu identidad git**: el plugin nunca toca `user.name` ni `user.email`.
   - Las ramas `mp/*` se borran al aplicar o descartar, y los worktrees de más de 24 h se limpian en `SessionStart`.
+- **Sin push ni PRs del worker** (aunque se salte los hooks):
+  - el worker corre sin `GH_TOKEN`, `GITHUB_TOKEN`, sus variantes Enterprise, `GIT_ASKPASS`, `SSH_ASKPASS` ni `SSH_AUTH_SOCK`;
+  - además lleva `GIT_TERMINAL_PROMPT=0`, `credential.helper` vacío y `GIT_ALLOW_PROTOCOL=file`, así que git no puede hablar con ningún remoto;
+  - `GH_CONFIG_DIR` apunta a un directorio vacío y un `gh` del plugin va primero en el `PATH` y siempre falla;
+  - las credenciales del propio CLI (`~/.codex`, API keys) no se tocan;
+  - tras cada delegación se comprueba con `git ls-remote` si su rama `mp/*` apareció en algún remoto (`worker_push`, con el comando para borrarla).
+- **`specs/` es tuyo**: lo que el worker cambie bajo `specs/` se restaura antes del diff (`specs_modified`) y nunca se aplica. Con `/sdd-delegate`, los archivos cambiados fuera de los `Files` de la tarea se marcan como drift (`outside_task_files`) y dejan la tarea sin verificar. En un repo con `specs/`, la delegación automática usa `/sdd-delegate` para implementar, y un `delegate` en modo write avisa de que se salta el flujo SDD. Detalle en [`docs/sdd-guardrails.md`](docs/sdd-guardrails.md).
 - **Credenciales**: el plugin nunca lee ni registra `~/.codex/auth.json`, tokens OAuth ni `.env`. El prompt builder bloquea `.env*`, `auth.json`, claves, `.npmrc`, `.netrc`, `~/.aws`, gcloud y otros, y también cualquier ruta fuera del proyecto. Para auth solo se mira el **exit code** de `codex login status`.
 - **Auditoría**: `~/.claude/multi-provider/logs/YYYY-MM-DD.jsonl` guarda proveedor, modo, estado, duración, intentos y tipos de error, el **hash SHA-256 del prompt** y las violaciones. No guarda contenido.
 
@@ -340,7 +348,7 @@ hooks/conductor/{card.tsx,model.ts}   types/index.d.ts   tests/conductor-card.te
 config/multiprovider.example.json     statusline/index.js   .github/workflows/ci.yml
 specs/<slug>/{spec,plan,tasks}.md     docs/*.md
 server/  bootstrap.mjs · src/{index,cli,config,delegate,fallback,circuit-breaker,health,worktree,
-         prompt-builder,process,state,audit,hooks,setup,sanitize,gh-scrub,doctor}.ts · providers/{types,codex,antigravity}.ts
+         prompt-builder,process,state,audit,hooks,setup,sanitize,gh-scrub,doctor,worker-env,remote-check}.ts · providers/{types,codex,antigravity}.ts
          sdd/{artifacts,brief,claim,verify,task-delegation}.ts
          tests/ (vitest *.spec.ts + binarios fake) · dist/ (compilado, versionado)
 ```

@@ -37,6 +37,8 @@ export interface SddDelegateResponse extends DelegateResponse {
     acceptance: AcceptanceVerdict[];
     verification: VerifyItem[];
     verified: boolean;
+    /** Changed files outside the task's Files (spec drift, R7 of sdd-guardrails). */
+    drift: string[];
     notesDraft: string;
     handback?: { owner: "—"; commit: string };
   };
@@ -137,6 +139,7 @@ export async function sddTaskDelegate(
       provider,
       task: brief.task,
       files: brief.files,
+      scopeFiles: task.files,
       extraOutput: brief.extraOutput,
       mode,
       fallback: true,
@@ -149,7 +152,8 @@ export async function sddTaskDelegate(
   const verification = r.worktreePath ? await verifyTask(r.worktreePath, task, feature.gates, ctx.config.verify.timeoutMs) : [];
   const acceptance = parseAcceptance(r.output, acceptanceItems(feature, task));
   // Pipeline-only gates are read from CI later; anything else must have run and passed.
-  const verified = verification.length > 0 && verification.every((v) => v.result === "pass" || v.reason?.startsWith("pipeline-only"));
+  const drift = (r.violations ?? []).flatMap((v) => (v.type === "outside_task_files" ? v.files : []));
+  const verified = drift.length === 0 && verification.length > 0 && verification.every((v) => v.result === "pass" || v.reason?.startsWith("pipeline-only"));
   const sdd: SddDelegateResponse["sdd"] = {
     slug: feature.slug,
     taskId: task.id,
@@ -157,6 +161,7 @@ export async function sddTaskDelegate(
     acceptance,
     verification,
     verified,
+    drift,
     notesDraft: notesDraft(r, task, verification, acceptance),
   };
   const notes = [...(r.notes ?? [])];
@@ -173,7 +178,9 @@ export async function sddTaskDelegate(
       steps.push(
         verified
           ? `Verify and gates passed in ${r.worktreePath}. Review the diff and the acceptance verdicts against the real code.`
-          : `NOT VERIFIED: see sdd.verification. The diff stays in ${r.worktreePath} and ${task.id} stays claimed; fix it there, ask the worker again, or discard.`,
+          : drift.length > 0
+            ? `SPEC DRIFT: the worker changed files outside ${task.id}'s Files (${drift.join(", ")}). Decide with the user: revert them in ${r.worktreePath}, or amend the spec/tasks first.`
+            : `NOT VERIFIED: see sdd.verification. The diff stays in ${r.worktreePath} and ${task.id} stays claimed; fix it there, ask the worker again, or discard.`,
         `Accept: \`delegation_apply\` with the worktreePath, then run your clean-code review, tick ${task.id}, write its Notes from sdd.notesDraft and commit \`${feature.slug}: ${task.id} …\` (no attribution trailers).`,
         `Reject: \`delegation_discard\` with the worktreePath, then \`sdd_task_release\` and commit the handback.`,
       );

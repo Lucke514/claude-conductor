@@ -33,6 +33,9 @@
     "commands": ["npm run lint", "npm test"],
     "timeoutMs": 300000
   },
+  "guardrails": {
+    "checkRemotePush": true
+  },
   "statusline": {
     "mode": "compact"
   },

@@ -9,7 +9,7 @@ import { makeRepo, testConfig, tmpDir } from "./helpers.js";
 import { PLAN, SPEC, TASKS, writeFeature } from "./sdd-fixtures.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
-const ENV = ["FAKE_MODE", "FAKE_MESSAGE", "FAKE_WRITE_FILE", "FAKE_ARGS_FILE"];
+const ENV = ["FAKE_MODE", "FAKE_MESSAGE", "FAKE_WRITE_FILE", "FAKE_ARGS_FILE", "FAKE_PROBE_FILE"];
 const WORKER = "## Summary\nDone.\n\n## Acceptance\n- [met] A1 — sdd-brief.spec.ts passes\n- [not met] R1 — the brief misses the plan\n";
 
 afterEach(() => {
@@ -68,6 +68,7 @@ describe("sdd_task_* tools", () => {
       ["gate", "Dist", "manual"],
     ]);
     expect(r.sdd.verified).toBe(true);
+    expect(r.sdd.drift).toEqual([]);
     expect(r.sdd.acceptance.map((a) => [a.id, a.verdict])).toEqual([["A1", "met"], ["R1", "not met"], ["E2", "unverifiable"]]);
     expect(r.sdd.notesDraft).toContain(`T3 delegated to codex (delegation ${r.id})`);
     expect(r.sdd.notesDraft).toContain("acceptance 1/3 met");
@@ -75,6 +76,21 @@ describe("sdd_task_* tools", () => {
     expect(after).not.toContain("- [x] Done\n- **Owner**: codex");
     expect(after.match(/- \*\*Notes\*\*: —/g)).toHaveLength(TASKS.match(/- \*\*Notes\*\*: —/g)!.length);
     expect(r.nextSteps[1]).toContain("delegation_apply");
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("sdd-guardrails R7/E3: files outside the task's Files are drift and leave it unverified", async () => {
+    const s = setup();
+    await claimAndCommit(s);
+    process.env.FAKE_MODE = "probe";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts,otro.ts,src/nuevo.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, s.ctx);
+    expect(r.filesChanged).toEqual(["index.ts", "otro.ts", "src/nuevo.ts"]);
+    expect(r.sdd.drift).toEqual(["otro.ts"]);
+    expect(r.sdd.verified).toBe(false);
+    expect(r.violations).toContainEqual(expect.objectContaining({ type: "outside_task_files", files: ["otro.ts"] }));
+    expect(r.nextSteps[0]).toContain("SPEC DRIFT");
     await removeWorktree(await readMeta(r.worktreePath!));
   });
 

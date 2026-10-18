@@ -7,7 +7,9 @@ import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
 import { PROVIDER_NAMES, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
 import { recordCall, recordRecent, taskLabel, type StateStore } from "./state.js";
-import { collectChanges, createWorktree, removeWorktree, workerGitEnv, type Changes, type Violation, type WorktreeMeta } from "./worktree.js";
+import { checkRemotePush, type PushViolation } from "./remote-check.js";
+import { ensureShims, workerEnv } from "./worker-env.js";
+import { collectChanges, createWorktree, removeWorktree, type Changes, type Violation, type WorktreeMeta } from "./worktree.js";
 
 export interface DelegateParams {
   provider: ProviderName | "auto";
@@ -18,6 +20,8 @@ export interface DelegateParams {
   model?: string;
   taskType?: string;
   fallback?: boolean;
+  /** Files the task may change (an entry ending in `/` covers a directory); anything else is reported as drift. */
+  scopeFiles?: string[];
   /** Extra "Expected output" lines for the worker (e.g. the SDD Acceptance section). */
   extraOutput?: string[];
   /** Claude Code session id (injected by the PreToolUse hook). */
@@ -44,10 +48,27 @@ export interface DelegateResponse {
   usage?: TokenUsage;
   routing?: { rule: string; provider: ProviderName };
   files: FileReport[];
-  violations?: (Violation | { type: "write_in_read_mode"; detail: string })[];
+  violations?: (Violation | PushViolation | ScopeViolation | { type: "write_in_read_mode"; detail: string })[];
   summary?: string;
   notes?: string[];
   nextSteps: string[];
+}
+
+export interface ScopeViolation {
+  type: "outside_task_files";
+  detail: string;
+  files: string[];
+}
+
+const normPath = (p: string): string => p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+
+/** Changed files not covered by the task's Files (exact path, or under an entry ending in `/`). */
+export function outsideScope(changed: string[], scope: string[]): string[] {
+  const entries = scope.map(normPath).filter(Boolean);
+  return changed.filter((f) => {
+    const file = normPath(f);
+    return !entries.some((e) => (e.endsWith("/") ? file.startsWith(e) : file === e));
+  });
 }
 
 export interface DelegateContext {
@@ -104,6 +125,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     });
   }
 
+  await ensureShims();
   const execute = async (provider: ProviderName, adapter: ProviderAdapter): Promise<ProviderResult> => {
     let meta: WorktreeMeta | undefined;
     if (isolate && repoRoot) {
@@ -123,7 +145,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
         mode,
         timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
         ...(model ? { model } : {}),
-        env: meta ? workerGitEnv(meta) : {},
+        env: workerEnv(meta),
       });
     } catch (err) {
       result = { ok: false, output: "", exitCode: null, durationMs: 0, error: { type: "NON_ZERO_EXIT", message: (err as Error).message } };
@@ -132,11 +154,26 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     if (meta) {
       const changes = await collectChanges(meta, config.defaults.maxDiffBytes, `${id}-${provider}`);
       violations.push(...changes.violations);
+      if (config.guardrails.checkRemotePush) {
+        const pushed = await checkRemotePush(meta.repoRoot, meta.branch);
+        violations.push(...pushed.violations);
+        notes.push(...pushed.notes);
+      }
       if (mode === "read" && changes.files.length > 0) {
         violations.push({
           type: "write_in_read_mode",
           detail: `${provider} modified ${changes.files.length} file(s) in read mode; changes were discarded: ${changes.files.slice(0, 10).join(", ")}`,
         });
+      }
+      if (params.scopeFiles && mode === "write" && changes.files.length > 0) {
+        const outside = outsideScope(changes.files, params.scopeFiles);
+        if (outside.length > 0) {
+          violations.push({
+            type: "outside_task_files",
+            detail: `${provider} changed ${outside.length} file(s) outside the task's Files: ${outside.slice(0, 10).join(", ")}`,
+            files: outside,
+          });
+        }
       }
       if (mode === "write" && result.ok && changes.files.length > 0) {
         kept = { meta, changes };
@@ -265,6 +302,9 @@ function nextSteps(r: DelegateResponse): string[] {
       "Accept: call `delegation_apply` with the worktreePath (git apply --3way onto the user's branch, no commit), then commit yourself.",
       "Reject: call `delegation_discard` with the worktreePath. mp/* branches are never merged.",
     );
+  }
+  for (const v of r.violations ?? []) {
+    if (v.type === "worker_push") steps.push(`A worker pushed ${v.branch} to '${v.remote}'. Tell the user and, with their OK, delete it: \`git push ${v.remote} --delete ${v.branch}\`.`);
   }
   if (r.violations?.length) steps.push("Violations were recorded (see `violations`); treat this result with extra suspicion.");
   return steps;

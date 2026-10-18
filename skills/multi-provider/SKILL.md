@@ -50,4 +50,6 @@ When the work is a task of a spec-driven feature (`specs/<slug>/tasks.md` with a
 
 - Workers never commit, push or open PRs (a hook blocks commits; any worker commit is undone with `git reset --soft` and logged as a violation).
 - Only Claude commits, with the user's git identity and without AI attribution.
+- Workers run without git/GitHub credentials (no tokens, no SSH agent, git limited to local transports, a `gh` that always refuses), so they cannot push or open pull requests. A `worker_push` violation means a branch reached a remote anyway: tell the user and give them the `git push <remote> --delete <branch>` from `nextSteps`.
+- Worker changes under `specs/` are restored and never applied (`specs_modified`); in a spec-driven repo, implement through `/sdd-delegate`, and treat `outside_task_files` / `sdd.drift` as spec drift to settle with the user.
 - Every delegation is logged (metadata only, prompt hash) in `~/.claude/multi-provider/logs/`.
