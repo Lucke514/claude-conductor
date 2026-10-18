@@ -42,6 +42,10 @@ Claude Code is always the **orchestrator and supervisor**. Workers (Codex via `c
    - **Discard** → `delegation_discard(worktreePath)`.
 5. `mp/*` branches are never merged; worktrees are removed on apply/discard (stale ones after 24 h).
 
+## Spec-driven tasks
+
+When the work is a task of a spec-driven feature (`specs/<slug>/tasks.md` with approved spec, plan and tasks), use `/sdd-delegate <slug> <T#|next>` instead of writing a brief by hand: `sdd_task_claim` writes the task's `**Owner**`, you commit that claim, and `sdd_task_delegate` builds the brief from the artifacts, runs the task's `Verify` and the plan's gates in the worktree, and returns per-criterion verdicts plus a `Notes` draft. On discard, `sdd_task_release` hands the task back. Ticking the box and writing `Notes` stay yours, after your own review.
+
 ## Hard rules
 
 - Workers never commit, push or open PRs (a hook blocks commits; any worker commit is undone with `git reset --soft` and logged as a violation).

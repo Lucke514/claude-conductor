@@ -67,7 +67,10 @@ async function readFileForPrompt(rel, projectDir, maxFileBytes, budget) {
         };
     }
     catch (err) {
-        return { report: { path: display, included: false, reason: `unreadable: ${err.code ?? "error"}` } };
+        const code = err.code;
+        if (code === "ENOENT")
+            return { report: { path: display, included: false, reason: "does not exist yet — to be created" } };
+        return { report: { path: display, included: false, reason: `unreadable: ${code ?? "error"}` } };
     }
 }
 export function constraintsFor(mode) {
@@ -131,7 +134,7 @@ export async function buildPrompt(input) {
             parts.push("Files not included:", ...skipped.map((r) => `- ${r.path}: ${r.reason}`), "");
         }
     }
-    parts.push("## Expected output", outputFormatFor(input.mode), "");
+    parts.push("## Expected output", outputFormatFor(input.mode), ...(input.extraOutput ?? []), "");
     const prompt = parts.join("\n");
     return { prompt, sha256: createHash("sha256").update(prompt).digest("hex"), files: reports };
 }

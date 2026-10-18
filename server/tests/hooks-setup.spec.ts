@@ -36,6 +36,21 @@ describe("PreToolUse(delegate)", () => {
     const out = (await preDelegate({ cwd: tmpDir(), tool_input: { provider: "auto", task: "t" } })) as any;
     expect(out.hookSpecificOutput.permissionDecision).toBe("ask");
   });
+  it("sdd_task_delegate defaults to write: asks and injects the session id", async () => {
+    const tool_name = "mcp__plugin_multi-provider_multi-provider__sdd_task_delegate";
+    const out = (await preDelegate({ session_id: "s1", cwd: tmpDir(), tool_name, tool_input: { slug: "demo", task: "T3" } })) as any;
+    expect(out.hookSpecificOutput.permissionDecision).toBe("ask");
+    expect(out.hookSpecificOutput.permissionDecisionReason).toContain("the worker claimed for demo/T3");
+    expect(out.hookSpecificOutput.updatedInput).toEqual({ slug: "demo", task: "T3", sessionId: "s1" });
+    const read = (await preDelegate({ session_id: "s1", cwd: tmpDir(), tool_name, tool_input: { slug: "demo", task: "T3", mode: "read" } })) as any;
+    expect(read.hookSpecificOutput.permissionDecision).toBeUndefined();
+  });
+  it("hooks.json routes sdd_task_delegate through pre-delegate only", () => {
+    const hooks = JSON.parse(readFileSync(new URL("../../hooks/hooks.json", import.meta.url), "utf8")).hooks;
+    const matchers = (event: string) => hooks[event].filter((h: any) => h.hooks.some((c: any) => /pre-delegate|post-delegate/.test(c.command))).map((h: any) => h.matcher);
+    expect(matchers("PreToolUse")).toContain("mcp__plugin_multi-provider_multi-provider__sdd_task_delegate");
+    expect(matchers("PostToolUse")).toEqual(["mcp__plugin_multi-provider_multi-provider__delegate"]);
+  });
 });
 
 describe("PreToolUse(Bash)", () => {
