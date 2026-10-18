@@ -107,7 +107,7 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 ### Verification report — sdd-task-delegation — 2026-10-18 — pass 1
 
 Change set: `3ea6976` (`main@b5b0714...HEAD`)
-Converged: no — pipeline gates pending (step 4)
+Converged: no — awaiting the user's decision on R10/SC1 (a real `/sdd-delegate` run with `codex` or `agy`, or accepting it as a documented limitation)
 
 | Req | Verdict | Evidence (case · assertion · clause) |
 |---|---|---|
@@ -133,7 +133,7 @@ Converged: no — pipeline gates pending (step 4)
 | E10 | met | `sdd-claim.spec.ts::"E10/SC2…"` — runs the returned command with `index.ts` modified; asserts the commit holds only `specs/demo/tasks.md` and `index.ts` stays modified; runner: `1 passed` |
 
 Coverage: surfaces API ✅ (R1–R9, MCP tools) · CLI ✅ (R10, partially met) · sensitive ground: access control non-goal · traceability R9 · data handling E5 · data lifecycle non-goal · repeat-request correctness E6 · accessibility non-goal (no UI)
-Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 16 passed (16) · Tests 181 passed (181)` (baseline 154 passed (154); +27 new, 0 skipped) · `claude plugin validate .` ✅ `√ Validation passed` · `claude plugin test .` ✅ `7 pass, 0 fail` · Pipeline: `dist` ⏳ pending (local `npm run build` leaves `server/dist` with no diff) · matrix ubuntu/macos/windows × Node 20/22 ⏳ pending — no run for this change set yet
+Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 16 passed (16) · Tests 181 passed (181)` (baseline 154 passed (154); +27 new, 0 skipped) · `claude plugin validate .` ✅ `√ Validation passed` · `claude plugin test .` ✅ `7 pass, 0 fail` · Pipeline: run 39094610235 on `2f6a7fc` (same code as the change set; later commits touch only this file) — `dist is up to date` ✅ · `claude plugin validate / test` ✅ · `test` ubuntu/macos/windows × Node 20/22 ✅ 6/6
 Attribution: none — no failure required attribution
 Tests removed: none
 Clean-code sweep: none · close calls: `parseStatus`/`parseRequirements`/`parseComponents` are exported but only used inside `artifacts.ts` — kept, they are the module's parsing surface next to the tested `parseTasks`/`parseGates`
