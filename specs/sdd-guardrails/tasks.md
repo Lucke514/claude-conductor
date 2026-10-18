@@ -99,7 +99,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 ## T6 — Auditoría de las violaciones nuevas
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C6 · **Implements**: R8, E9
 - **Files**: `server/tests/guardrails.spec.ts`
 - **Do**: test que lee el JSONL de auditoría tras delegaciones que producen `specs_modified`, `worker_push` y `outside_task_files`.
