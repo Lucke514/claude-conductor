@@ -3,7 +3,7 @@
 # Tasks: Integración robusta con Codex y Antigravity
 
 > Spec: [spec.md](./spec.md) · Plan: [plan.md](./plan.md)
-> Status: draft
+> Status: approved
 > Last updated: 2026-10-18
 
 Una tarea = una sesión. Hecha significa:
@@ -19,7 +19,7 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 ## T1 — `runProcess`: cancelación, salida en vivo y timeout por inactividad
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C1, C3 · **Implements**: R4, R6
 - **Files**: `server/src/process.ts`, `server/tests/process.spec.ts`
 - **Do**: Agregar a `RunOptions`:

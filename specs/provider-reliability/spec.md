@@ -78,6 +78,7 @@ En la sesión del 2026-10-18, implementando `sdd-traceability`, pasó esto:
 - 2026-10-18 Q3: Codex por `app-server` por defecto, con fallback automático a `exec` — propuesta aceptada por el usuario.
 - 2026-10-18 Spec aprobado por el usuario.
 - 2026-10-18 Plan aprobado por el usuario; la integración va por PR para que la matriz de Windows pruebe la cancelación.
+- 2026-10-18 Tasks aprobadas por el usuario.
 
 ## Open questions
 
