@@ -2,7 +2,7 @@
 
 # Spec: Delegación sobre repos anidados (workspace multi-repo)
 
-> Status: approved
+> Status: implemented
 > Owner: Lucas Gonzalez Espinosa (@Lucke514)
 > Sign-off: — the session's user holds all of these
 > Tracking: — this project tracks work in the repo only
@@ -115,6 +115,7 @@ workspace/                      ← repo git (config + specs), CLAUDE_PROJECT_DI
 - 2026-10-18 Spec aprobada por el usuario, con las propuestas de arriba.
 - 2026-10-18 Plan aprobado por el usuario; integración por merge local a `main` sin PR, como 0.2.0 y 0.3.0.
 - 2026-10-18 Tasks aprobadas por el usuario; pidió ir rápido sin perder calidad.
+- 2026-10-18 Verificación convergida (pass 1, cross-review de codex: G1–G5 y G8 resueltos, G6 diferido, G7 descartado); fusionado en `main` sin PR y publicado como 0.4.0, con CI verde en la matriz (run 39106485044).
 
 ## Open questions
 
