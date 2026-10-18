@@ -53,8 +53,8 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 
 ## T3 — Comprobación de push al remoto
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C3 · **Implements**: R6, E6, E7
 - **Files**: `server/src/remote-check.ts`, `server/src/delegate.ts`, `server/src/config.ts`, `config/multiprovider.example.json`, `server/tests/guardrails.spec.ts`
 - **Do**: implementar `checkRemotePush` con `runProcess`, timeout de 10 s y `GIT_TERMINAL_PROMPT=0`; llamarlo en `execute` tras `collectChanges`; añadir `guardrails.checkRemotePush` (por defecto `true`) a la config y al ejemplo; añadir el paso con `git push <remote> --delete <branch>` cuando haya `worker_push`.
@@ -64,7 +64,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
   - Un remoto inalcanzable produce la nota "push check skipped" sin violación.
   - Un repo sin remotos no produce ni violación ni nota.
 - **Verify**: `npm --prefix server test -- guardrails config`
-- **Notes**: —
+- **Notes**: `server/src/remote-check.ts` (`checkRemotePush` con `runProcess`, 10 s, `GIT_TERMINAL_PROMPT=0`), llamada en `execute` tras `collectChanges`, paso `git push <remote> --delete <branch>` en `nextSteps`, `guardrails.checkRemotePush` en `config.ts` y en `config/multiprovider.example.json`; 3 casos en `guardrails.spec.ts` y 1 aserción en `config.spec.ts`; commit `sdd-guardrails: T3 remote push check`. Gates: typecheck 0 errores, 190 passed. Clean-code: none · close calls: la comprobación corre también en modo read — se queda, un worker en read puede hacer push igual
 
 ## T4 — Drift fuera de los `Files` de la tarea
 

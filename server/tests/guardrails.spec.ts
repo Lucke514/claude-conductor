@@ -122,3 +122,43 @@ describe("specs/ is off limits (R3, E2)", () => {
     expect(r.violations?.map((v) => v.type).sort()).toEqual(["specs_modified", "write_in_read_mode"]);
   });
 });
+
+describe("remote push check (R6, E6, E7)", () => {
+  function withBareRemote() {
+    const repo = makeRepo();
+    const bare = tmpDir("mp-bare-");
+    git(bare, "init", "-q", "--bare");
+    git(repo, "remote", "add", "origin", bare);
+    return { repo, bare };
+  }
+
+  it("flags a branch the worker pushed past the hooks and says how to delete it", async () => {
+    const { repo, bare } = withBareRemote();
+    process.env.FAKE_PUSH = "origin";
+    process.env.FAKE_WRITE_FILE = "added.txt";
+    const { r, p } = await probe(repo);
+    expect(p.push!.code).toBe(0);
+    const pushed = r.violations?.find((v) => v.type === "worker_push");
+    expect(pushed).toMatchObject({ type: "worker_push", remote: "origin", branch: r.branch });
+    expect(git(bare, "branch", "--list", "mp/*")).toContain(r.branch!);
+    expect(r.nextSteps.join("\n")).toContain(`git push origin --delete ${r.branch}`);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("guardrails.checkRemotePush=false skips the check", async () => {
+    const { repo } = withBareRemote();
+    process.env.FAKE_PUSH = "origin";
+    const { r } = await probe(repo, "write", { guardrails: { checkRemotePush: false } });
+    expect(r.violations?.some((v) => v.type === "worker_push") ?? false).toBe(false);
+  });
+
+  it("an unreachable remote is a note, not a violation; no remotes means no note", async () => {
+    const repo = makeRepo();
+    git(repo, "remote", "add", "origin", "http://127.0.0.1:9/x.git");
+    const { r } = await probe(repo);
+    expect(r.violations ?? []).toEqual([]);
+    expect(r.notes?.some((n) => n.startsWith("push check skipped: origin:"))).toBe(true);
+    const { r: none } = await probe(makeRepo());
+    expect(none.notes?.some((n) => n.startsWith("push check")) ?? false).toBe(false);
+  });
+});
