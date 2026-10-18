@@ -19,7 +19,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 ## T1 [P] — Lectura tolerante y parsers de reportes y scope
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: codex (multi-provider) since 2026-10-18
 - **Component**: C1 · **Implements**: E2, E4, E8, E10
 - **Files**: `server/src/sdd/artifacts.ts`, `server/tests/sdd-artifacts.spec.ts`, `server/tests/sdd-fixtures.ts`
 - **Do**: En `artifacts.ts`, añadir:
@@ -61,7 +61,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 ## T3 [P] — `slug` y `taskId` en audit y state
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: antigravity (multi-provider) since 2026-10-18
 - **Component**: C2 · **Implements**: R5, E7
 - **Files**: `server/src/audit.ts`, `server/src/state.ts`, `server/src/delegate.ts`, `server/src/sdd/task-delegation.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/delegate.spec.ts`
 - **Do**:
@@ -75,7 +75,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 ## T4 [P] — Usage de Claude Code en la card
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C5 · **Implements**: R9, E12, E13, E14
 - **Files**: `hooks/conductor/model.ts`, `hooks/conductor/card.tsx`, `types/index.d.ts`, `server/tests/card-model.spec.ts`, `tests/conductor-card.test.tsx`
 - **Do**:
