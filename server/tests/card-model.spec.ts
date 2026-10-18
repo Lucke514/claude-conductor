@@ -35,7 +35,10 @@ describe("conductor card model", () => {
     [{ health: { installed: false, enabled: true } }, "not_installed", "✗ no instalado"],
     [{ health: { installed: true, enabled: false } }, "disabled", "– deshabilitado"],
     [undefined, "unknown", "· sin datos"],
-    [{ ...ok, metrics: { day: TODAY, callsToday: 1, lastError: { type: "TIMEOUT", at: "2026-10-18T11:57:00Z" }, lastCallAt: "2026-10-18T11:57:00Z" } }, "degraded", "! inestable"],
+    // provider-reliability R7: one attributable failure is not "unstable"; two in a row are.
+    [{ ...ok, breaker: { state: "closed", consecutiveFailures: 1 }, metrics: { day: TODAY, callsToday: 1, lastError: { type: "TIMEOUT", at: "2026-10-18T11:57:00Z" }, lastCallAt: "2026-10-18T11:57:00Z" } }, "ok", "● afinado"],
+    [{ ...ok, breaker: { state: "closed", consecutiveFailures: 2 }, metrics: { day: TODAY, callsToday: 2, lastError: { type: "TIMEOUT", at: "2026-10-18T11:57:00Z" }, lastCallAt: "2026-10-18T11:57:00Z" } }, "degraded", "! inestable"],
+    [{ ...ok, breaker: { state: "closed", consecutiveFailures: 0 }, metrics: { day: TODAY, callsToday: 1, lastNotice: { type: "CANCELLED", at: "2026-10-18T11:59:00Z" }, lastCallAt: "2026-10-18T11:59:00Z" } }, "ok", "● afinado"],
   ] as const)("provider status %#", (p, kind, badge) => {
     const v = providerView("codex", p as never, NOW, TODAY);
     expect(v.kind).toBe(kind);
@@ -213,5 +216,13 @@ describe("SDD pipeline lines", () => {
     expect(ownerProvider("antigravity (multi-provider) since 2026-10-18")).toBe("antigravity");
     expect(ownerProvider("claude (sesión principal)")).toBeUndefined();
     expect(ownerProvider(null)).toBeUndefined();
+  });
+});
+
+describe("provider-reliability R7: honest health", () => {
+  it("a notice shows as a dim detail, never as unstable", () => {
+    const v = providerView("antigravity", { health: { installed: true, enabled: true, auth: "ok" }, breaker: { consecutiveFailures: 0 }, metrics: { day: TODAY, callsToday: 1, lastNotice: { type: "STALLED", at: "2026-10-18T11:59:00Z" }, lastCallAt: "2026-10-18T11:59:00Z" } } as never, NOW, TODAY);
+    expect(v.kind).toBe("ok");
+    expect(v.detail).toContain("aviso STALLED");
   });
 });

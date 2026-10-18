@@ -45,6 +45,7 @@ export type ProviderStateFile = {
     tokensToday?: number
     durationMsToday?: number
     lastError?: { type: string; message?: string; at: string } | null
+    lastNotice?: { type: string; message?: string; at: string } | null
     lastCallAt?: string | null
   }
   history?: { at: string; ok: boolean; tokens: number; durationMs: number }[]

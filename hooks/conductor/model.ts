@@ -39,6 +39,8 @@ export interface ProviderStateFile {
     tokensToday?: number;
     durationMsToday?: number;
     lastError?: { type: string; message?: string; at: string } | null;
+    /** A failure that was not the provider's fault (cancelled, stalled, permission). */
+    lastNotice?: { type: string; message?: string; at: string } | null;
     lastCallAt?: string | null;
   };
   history?: { at: string; ok: boolean; tokens: number; durationMs: number }[];
@@ -158,6 +160,9 @@ const FIX: Record<ProviderName, { auth: string; install: string }> = {
   antigravity: { auth: "abre agy e inicia sesión", install: "instala Antigravity CLI" },
 };
 
+/** Consecutive failures attributable to the provider before the card calls it unstable (same in the status line). */
+export const DEGRADED_AFTER = 2;
+
 export function providerView(name: ProviderName, p: ProviderStateFile | undefined, now: number, today: string): ProviderView {
   const health = p?.health ?? {};
   const breaker = p?.breaker ?? {};
@@ -167,7 +172,11 @@ export function providerView(name: ProviderName, p: ProviderStateFile | undefine
   const dur = m?.durationMsToday ?? 0;
   const cooldownMs = breaker.state === "open" && breaker.cooldownUntil ? Math.max(0, breaker.cooldownUntil - now) : 0;
   const lastErr = p?.metrics?.lastError ?? null;
-  const recentErr = lastErr && now - Date.parse(lastErr.at) < 10 * 60_000 && lastErr.at >= (p?.metrics?.lastCallAt ?? "");
+  const fails = breaker.consecutiveFailures ?? 0;
+  // One failure is noise; "! inestable" needs two in a row the provider is to blame for (the breaker counts only those).
+  const unstable = fails >= DEGRADED_AFTER;
+  const notice = p?.metrics?.lastNotice ?? null;
+  const recentNotice = notice && now - Date.parse(notice.at) < 10 * 60_000 && notice.at >= (p?.metrics?.lastCallAt ?? "");
 
   let kind: StatusKind;
   if (health.enabled === false) kind = "disabled";
@@ -175,7 +184,7 @@ export function providerView(name: ProviderName, p: ProviderStateFile | undefine
   else if (health.auth === "missing") kind = "no_auth";
   else if (cooldownMs > 0) kind = "cooldown";
   else if (breaker.state === "open" || breaker.state === "half_open") kind = "half_open";
-  else if (recentErr) kind = "degraded";
+  else if (unstable) kind = "degraded";
   else if (!p?.health && !p?.metrics) kind = "unknown";
   else kind = "ok";
 
@@ -183,17 +192,20 @@ export function providerView(name: ProviderName, p: ProviderStateFile | undefine
     .filter(Boolean)
     .join(" · ");
   const errType = lastErr?.type ?? "";
-  const fails = breaker.consecutiveFailures ?? 0;
 
   const table: Record<StatusKind, { tone: Tone; badge: string; detail: string; fix?: string }> = {
-    ok: { tone: "ok", badge: calls ? "● afinado" : "● listo", detail: usage || "sin llamadas hoy" },
+    ok: {
+      tone: "ok",
+      badge: calls ? "● afinado" : "● listo",
+      detail: recentNotice ? `aviso ${notice.type} ${fmtAgo(notice.at, now)}` : usage || "sin llamadas hoy",
+    },
     cooldown: {
       tone: "warn",
       badge: `◐ silencio ${fmtDuration(cooldownMs)}`,
       detail: `circuito abierto${errType ? ` · ${errType}${fails > 1 ? ` ×${fails}` : ""}` : ""}`,
     },
     half_open: { tone: "warn", badge: "◐ probando", detail: "circuito a prueba: la próxima llamada decide" },
-    degraded: { tone: "warn", badge: "! inestable", detail: `${errType}${lastErr ? ` ${fmtAgo(lastErr.at, now)}` : ""}` },
+    degraded: { tone: "warn", badge: "! inestable", detail: `${errType} ×${fails}${lastErr ? ` ${fmtAgo(lastErr.at, now)}` : ""}` },
     no_auth: { tone: "error", badge: "⊘ sin auth", detail: FIX[name].auth, fix: FIX[name].auth },
     not_installed: { tone: "error", badge: "✗ no instalado", detail: FIX[name].install, fix: FIX[name].install },
     disabled: { tone: "dim", badge: "– deshabilitado", detail: "enabled: false en la config" },

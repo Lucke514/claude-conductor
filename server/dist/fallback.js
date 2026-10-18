@@ -1,3 +1,4 @@
+import { isAttributable } from "./providers/types.js";
 // ---------------------------------------------------------------------------
 // Error classification
 // ---------------------------------------------------------------------------
@@ -11,6 +12,11 @@ export function classifyFailure(run, text, patterns) {
         }
         return { type: "NON_ZERO_EXIT", message: run.spawnError.message };
     }
+    // Killed by the plugin: the exit code (null) says nothing about the provider.
+    if (run.cancelled)
+        return { type: "CANCELLED", message: "delegation cancelled" };
+    if (run.stalled)
+        return { type: "STALLED", message: "no output for the idle timeout; process was killed" };
     if (run.timedOut)
         return { type: "TIMEOUT", message: "process exceeded timeout and was killed" };
     if (run.exitCode === 127)
@@ -95,7 +101,8 @@ export async function runChain(order, deps) {
                 attempts.push({ provider: entry, errorType: "CANCELLED", error: "cancelled", durationMs: result.durationMs });
                 return cancelled(entry, result);
             }
-            deps.breaker.onFailure(entry);
+            if (isAttributable(type))
+                deps.breaker.onFailure(entry);
             attempts.push({
                 provider: entry,
                 error: result.error?.message ?? "unknown error",

@@ -9,9 +9,20 @@ export const ERROR_TYPES = [
   "PARSE_ERROR",
   /** The delegation was cancelled (MCP cancellation or delegation_cancel): never the provider's fault. */
   "CANCELLED",
+  /** No output for `idleTimeoutMs`: killed by the plugin, not the provider's fault. */
+  "STALLED",
+  /** The worker waited for a permission the headless run cannot grant (configuration). */
+  "PERMISSION_BLOCKED",
 ] as const;
 
 export type ErrorType = (typeof ERROR_TYPES)[number];
+
+/** Failures the plugin or its configuration caused: they never count against the provider. */
+const NOT_ATTRIBUTABLE: readonly ErrorType[] = ["CANCELLED", "STALLED", "PERMISSION_BLOCKED"];
+
+export function isAttributable(type: ErrorType | "CIRCUIT_OPEN"): boolean {
+  return !(NOT_ATTRIBUTABLE as readonly string[]).includes(type);
+}
 
 export const PROVIDER_NAMES = ["codex", "antigravity"] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];

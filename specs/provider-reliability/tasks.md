@@ -63,8 +63,8 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 
 ## T3 — Fallos atribuibles y salud honesta
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C2 · **Implements**: R7
 - **Files**: `server/src/providers/types.ts`, `server/src/fallback.ts`, `server/src/delegate.ts`, `server/src/state.ts`, `hooks/conductor/model.ts`, `types/index.d.ts`, `statusline/index.js`, `server/tests/fallback.spec.ts`, `server/tests/card-model.spec.ts`, `server/tests/statusline.spec.ts`
 - **Do**:
@@ -80,12 +80,12 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
   - la status line usa el mismo umbral;
   - `statusline.spec.ts` pasa con y sin `NO_COLOR` en el entorno.
 - **Verify**: `npm --prefix server test -- fallback card-model statusline`
-- **Notes**: —
+- **Notes**: Hecha por Claude. `STALLED` y `PERMISSION_BLOCKED` en `ERROR_TYPES`; `isAttributable` en `providers/types.ts`, sin dependencias, porque la usan `fallback.ts` y `state.ts`. `classifyFailure` lee `cancelled`/`stalled` antes del exit code. `runChain` solo llama a `breaker.onFailure` con fallos atribuibles. `recordCall` separa `lastError` de `lastNotice`. Card (`DEGRADED_AFTER = 2`) y status line: `! inestable` / `degradado` solo con 2 fallos atribuibles seguidos; un aviso reciente se ve como detalle `aviso <tipo>`. G2 de `sdd-traceability` resuelto: `statusline.spec.ts` borra `NO_COLOR` antes de cargar el script. Tests: +3 en `fallback.spec.ts`, +3 casos y 1 test en `card-model.spec.ts`, +1 en `statusline.spec.ts`. Gates: typecheck 0 errores, 251 passed (y la status line con `NO_COLOR=1`), plugin validate ok, plugin test 11 pass. Clean-code: none · close calls: el umbral 2 está en `model.ts` y en `statusline/index.js` (duplicado declarado en C2), y un test en cada lado lo fija
 
 ## T4 — Trabajos con estado: `delegation_status` y `delegation_cancel`
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C6 · **Implements**: R8, E4, E5, E6
 - **Files**: `server/src/jobs.ts`, `server/src/delegate.ts`, `server/src/state.ts`, `server/src/index.ts`, `hooks/conductor/card.tsx`, `hooks/conductor/model.ts`, `types/index.d.ts`, `server/tests/jobs.spec.ts`, `tests/conductor-card.test.tsx`
 - **Do**:

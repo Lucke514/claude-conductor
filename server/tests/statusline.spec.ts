@@ -8,6 +8,8 @@ import { tmpDir } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(here, "..", "..", "statusline", "index.js");
+// The script decides on colour when it loads: pin it so the suite does not depend on the shell (G2 of sdd-traceability).
+delete process.env.NO_COLOR;
 const sl = createRequire(import.meta.url)(SCRIPT) as {
   render: (input: object, raw: string, state: object | undefined, cfg: object, now: number) => string;
 };
@@ -68,6 +70,16 @@ describe("status line", () => {
     const out = sl.render({}, "", s, { mode: "compact" }, NOW);
     expect(out).toContain("\u001b[31m✗\u001b[0m");
     expect(out).toContain("\u001b[31m🔒\u001b[0m");
+  });
+
+  it("provider-reliability R7: one failure is not degraded, two in a row are (same rule as the card)", () => {
+    const at = "2026-10-18T11:59:00Z";
+    const mk = (n: number) => ({
+      providers: { codex: { health: { installed: true, enabled: true, auth: "ok" }, breaker: { state: "closed", consecutiveFailures: n }, metrics: { day: "2026-10-18", callsToday: 1, lastError: { type: "TIMEOUT", at }, lastCallAt: at } } },
+      sessions: {},
+    });
+    expect(strip(sl.render({}, "", mk(1), { mode: "full" }, NOW))).not.toContain("degradado");
+    expect(strip(sl.render({}, "", mk(2), { mode: "full" }, NOW))).toContain("degradado");
   });
 
   it("composes with a previous status line command", () => {

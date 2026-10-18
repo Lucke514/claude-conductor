@@ -1,6 +1,6 @@
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import type { MpConfig } from "./config.js";
-import type { ErrorType, ProviderAdapter, ProviderError, ProviderName, ProviderResult } from "./providers/types.js";
+import { isAttributable, type ErrorType, type ProviderAdapter, type ProviderError, type ProviderName, type ProviderResult } from "./providers/types.js";
 import type { RunResult } from "./process.js";
 
 // ---------------------------------------------------------------------------
@@ -11,7 +11,7 @@ import type { RunResult } from "./process.js";
 const PATTERN_ORDER: ErrorType[] = ["AUTH", "QUOTA", "RATE_LIMIT"];
 
 export function classifyFailure(
-  run: Pick<RunResult, "exitCode" | "timedOut" | "spawnError">,
+  run: Pick<RunResult, "exitCode" | "timedOut" | "spawnError"> & Partial<Pick<RunResult, "cancelled" | "stalled">>,
   text: string,
   patterns: Partial<Record<ErrorType, RegExp[]>>,
 ): ProviderError | undefined {
@@ -22,6 +22,9 @@ export function classifyFailure(
     }
     return { type: "NON_ZERO_EXIT", message: run.spawnError.message };
   }
+  // Killed by the plugin: the exit code (null) says nothing about the provider.
+  if (run.cancelled) return { type: "CANCELLED", message: "delegation cancelled" };
+  if (run.stalled) return { type: "STALLED", message: "no output for the idle timeout; process was killed" };
   if (run.timedOut) return { type: "TIMEOUT", message: "process exceeded timeout and was killed" };
   if (run.exitCode === 127) return { type: "NOT_INSTALLED", message: "exit code 127 (command not found)" };
   // Patterns are checked even when exit code is 0: some CLIs print the error and exit 0.
@@ -153,7 +156,7 @@ export async function runChain(order: ChainEntry[], deps: ChainDeps): Promise<Ch
         attempts.push({ provider: entry, errorType: "CANCELLED", error: "cancelled", durationMs: result.durationMs });
         return cancelled(entry, result);
       }
-      deps.breaker.onFailure(entry);
+      if (isAttributable(type)) deps.breaker.onFailure(entry);
       attempts.push({
         provider: entry,
         error: result.error?.message ?? "unknown error",

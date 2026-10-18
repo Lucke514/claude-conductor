@@ -1,5 +1,6 @@
 import { statePath } from "./paths.js";
 import { readJson, withLock, writeFileAtomic } from "./fsutil.js";
+import { isAttributable } from "./providers/types.js";
 const MAX_SESSIONS = 30;
 export const MAX_HISTORY = 10;
 export const MAX_RECENT = 8;
@@ -67,8 +68,13 @@ export function recordCall(s, rec, now = new Date()) {
     m.durationMsToday += rec.durationMs;
     m.durationMsTotal += rec.durationMs;
     m.lastCallAt = now.toISOString();
-    if (rec.error)
-        m.lastError = { ...rec.error, message: rec.error.message.slice(0, 200), at: now.toISOString() };
+    if (rec.error) {
+        const entry = { ...rec.error, message: rec.error.message.slice(0, 200), at: now.toISOString() };
+        if (isAttributable(rec.error.type))
+            m.lastError = entry;
+        else
+            m.lastNotice = entry;
+    }
     p.metrics = m;
     const hist = p.history ?? [];
     hist.push({ at: now.toISOString(), ok: !rec.error, tokens, durationMs: rec.durationMs });
