@@ -2,7 +2,7 @@
 
 # Spec: Guardrails de delegación
 
-> Status: draft
+> Status: approved
 > Owner: Lucas Gonzalez Espinosa (@Lucke514)
 > Sign-off: — the session's user holds all of these
 > Tracking: — this project tracks work in the repo only
@@ -35,7 +35,8 @@ Hoy el bloqueo de commits y pushes depende de hooks que un worker puede saltarse
 
 - **R1** — En un repo que usa SDD (existe al menos un `specs/<slug>/spec.md`), la delegación automática indica a Claude que el trabajo de implementación se delega con `sdd_task_claim`/`sdd_task_delegate` sobre una tarea aprobada, y nunca con `delegate` en modo write. En un repo sin `specs/`, el comportamiento actual no cambia.
   - Given un repo con `specs/demo/spec.md` y `/mp-auto on`, when llega un prompt, then el contexto inyectado nombra `/sdd-delegate` y prohíbe `delegate` en write para implementar.
-- **R2** — Un `delegate` en modo write dentro de un repo SDD, sin pasar por `sdd_task_delegate`, se trata según la decisión de la pregunta abierta 1 (por defecto: se pide confirmación con un aviso explícito de que se salta el flujo SDD).
+- **R2** — Un `delegate` en modo write dentro de un repo SDD pide confirmación con un aviso explícito de que se salta el flujo SDD y de que `/sdd-delegate` es el camino para tareas de `tasks.md`.
+  - Given un repo con `specs/demo/spec.md`, when se llama a `delegate` con `mode: "write"`, then el hook pide confirmación y el motivo menciona `/sdd-delegate`.
 - **R3** — Los cambios del worker bajo `specs/` nunca llegan al diff, ni con `delegate` ni con `sdd_task_delegate`: se revierten en el worktree antes de calcular el diff y se registran como violación `specs_modified` con la lista de archivos.
   - Given un worker que edita `specs/demo/tasks.md` y `src/a.ts`, when termina, then el diff contiene solo `src/a.ts` y `violations` incluye `specs_modified` con `specs/demo/tasks.md`.
 - **R4** — El proceso del worker se lanza sin credenciales de git ni de GitHub:
@@ -48,9 +49,9 @@ Hoy el bloqueo de commits y pushes depende de hooks que un worker puede saltarse
   - Given un worker que ejecuta `git push origin HEAD` con un remoto https o ssh, when corre, then git falla sin contactar al remoto.
 - **R5** — El `PATH` del worker empieza por un directorio del plugin con un `gh` (y `gh.cmd` en Windows) que siempre sale con error y un mensaje que explica que los PRs están reservados a Claude Code.
   - Given un worker que ejecuta `gh pr create`, when corre, then sale con código ≠ 0 y el mensaje del plugin, sin llamar al `gh` real.
-- **R6** — Al terminar cada delegación, si el repo tiene remotos, se comprueba con `git ls-remote` desde el entorno de Claude (no del worker) si la rama `mp/*` de esa delegación existe en algún remoto. Si existe, se registra la violación `worker_push` con el remoto y la rama, y los siguientes pasos piden al usuario borrarla.
-- **R7** — En `sdd_task_delegate`, cada archivo cambiado que no está en los `Files` de la tarea —ni dentro de un directorio listado ahí— se informa en `sdd.drift`. La tarea se marca según la decisión de la pregunta abierta 2 (por defecto, `verified: false`).
-  - Given T3 con `Files: src/a.ts` y un diff que toca `src/a.ts` y `src/b.ts`, when vuelve el resultado, then `sdd.drift` es `["src/b.ts"]`.
+- **R6** — Al terminar cada delegación, si el repo tiene remotos, se comprueba con `git ls-remote` desde el entorno de Claude (no del worker) si la rama `mp/*` de esa delegación existe en algún remoto; `guardrails.checkRemotePush: false` en la config la desactiva (por defecto activada). Si existe, se registra la violación `worker_push` con el remoto y la rama, y los siguientes pasos piden al usuario borrarla.
+- **R7** — En `sdd_task_delegate`, cada archivo cambiado que no está en los `Files` de la tarea —ni dentro de un directorio listado ahí— se informa en `sdd.drift`, y la respuesta queda con `verified: false`.
+  - Given T3 con `Files: src/a.ts` y un diff que toca `src/a.ts` y `src/b.ts`, when vuelve el resultado, then `sdd.drift` es `["src/b.ts"]` y `sdd.verified` es `false`.
 - **R8** — Las violaciones nuevas (`specs_modified`, `worker_push`) y el drift se registran en el log de auditoría con el mismo formato que las existentes.
 
 **Minimum shippable**: R3, R4, R5, R6, R7, E1, E5, E6.
@@ -79,13 +80,15 @@ Hoy el bloqueo de commits y pushes depende de hooks que un worker puede saltarse
 
 - 2026-10-18 La división de la integración SDD y su orden fueron aprobados por el usuario — ver `specs/sdd-integration/scope.md`.
 - 2026-10-18 El usuario pidió añadir a esta feature el cierre de los huecos de push y PR (R4, R5 y R6), tras confirmar que hoy un worker que se salta los hooks podría publicar con las credenciales del usuario.
+- 2026-10-18 R2: `delegate` en write en un repo SDD pide confirmación con aviso, no se rechaza — porque rechazarlo bloquearía cambios pequeños legítimos fuera de cualquier tarea.
+- 2026-10-18 R7: el drift deja la delegación con `verified: false` — porque spec-driven trata un cambio fuera de la tarea como spec drift, que decide el usuario.
+- 2026-10-18 R6: la comprobación del remoto está activada por defecto, con `guardrails.checkRemotePush: false` para apagarla — el coste (≤ 10 s por delegación) compensa no enterarse de un push.
+- 2026-10-18 R4: se acepta `GIT_ALLOW_PROTOCOL=file` aunque impida al worker `git fetch` o dependencias desde git — porque el worktree ya tiene lo necesario y es lo único que corta también el push por ssh con claves sin agente.
+- 2026-10-18 Spec aprobado por el usuario con las opciones por defecto de las cuatro preguntas abiertas.
 
 ## Open questions
 
-- [NEEDS CLARIFICATION: R2 — ¿qué pasa con un `delegate` en write dentro de un repo SDD? Por defecto, **pedir confirmación con aviso**, como hoy pero diciendo que se salta el flujo SDD. Rechazarlo bloquearía también cambios pequeños legítimos fuera de cualquier tarea.]
-- [NEEDS CLARIFICATION: R7 — ¿el drift deja la tarea como no verificada? Por defecto, **sí**: `verified: false`, porque spec-driven trata un cambio fuera de la tarea como spec drift, que decides tú.]
-- [NEEDS CLARIFICATION: R6 — ¿la comprobación del remoto se activa siempre? Cuesta una llamada de red por delegación (≤ 10 s con el timeout). Por defecto, **activada siempre**, con `guardrails.checkRemotePush: false` en la config para apagarla.]
-- [NEEDS CLARIFICATION: R4 — `GIT_ALLOW_PROTOCOL=file` también impide al worker hacer `git fetch` o instalar dependencias desde git. ¿Lo aceptamos? Por defecto, **sí**: el worktree ya tiene todo lo que necesita y es la forma de cortar cualquier push, también por ssh con claves sin agente.]
+- Ninguna.
 
 ## Success criteria
 
