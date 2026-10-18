@@ -35,7 +35,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 ## T2 — Pipeline de etapas
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: codex (multi-provider) since 2026-10-18
 - **Component**: C1 · **Implements**: R1, R2, R3, R4, R8, E1, E2, E5, E6, E7, E8, E10, E11
 - **Files**: `server/src/sdd/pipeline.ts`, `server/tests/sdd-pipeline.spec.ts`, `server/tests/sdd-fixtures.ts`
 - **Do**: Implementar `featureStatus(projectDir, slug, recent?)` y `listFeatureStatus(projectDir, recent?)` según C1:
