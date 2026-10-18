@@ -20,14 +20,16 @@ async function safeConfig(dir) {
 export async function preDelegate(input) {
     const toolInput = { ...(input.tool_input ?? {}) };
     const config = await safeConfig(projectDirFrom(input));
-    const mode = toolInput.mode ?? config?.defaults.mode ?? "read";
+    // sdd_task_delegate defaults to write; delegate follows defaults.mode.
+    const sdd = input.tool_name?.endsWith("__sdd_task_delegate") ?? false;
+    const mode = toolInput.mode ?? (sdd ? "write" : (config?.defaults.mode ?? "read"));
     if (input.session_id && !toolInput.sessionId)
         toolInput.sessionId = input.session_id;
     const out = { hookEventName: "PreToolUse", updatedInput: toolInput };
     if (mode === "write") {
         out.permissionDecision = "ask";
         out.permissionDecisionReason =
-            `multi-provider: '${String(toolInput.provider ?? "auto")}' will MODIFY files in an isolated git worktree ` +
+            `multi-provider: '${String(toolInput.provider ?? (sdd ? `the worker claimed for ${String(toolInput.slug)}/${String(toolInput.task)}` : "auto"))}' will MODIFY files in an isolated git worktree ` +
                 `(branch mp/*). Nothing is merged automatically — you will review the diff. Allow?`;
     }
     return { hookSpecificOutput: out };

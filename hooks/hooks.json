@@ -16,6 +16,16 @@
         ]
       },
       {
+        "matcher": "mcp__plugin_multi-provider_multi-provider__sdd_task_delegate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs\" cli hook pre-delegate",
+            "timeout": 30
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
