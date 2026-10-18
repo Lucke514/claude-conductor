@@ -125,6 +125,12 @@ export async function setStatuslineMode(mode) {
         sl.mode = mode;
     });
 }
+export async function setAutoDelegate(enabled) {
+    return updateUserConfig((c) => {
+        const ad = (c.autoDelegate ??= {});
+        ad.enabled = enabled;
+    });
+}
 // ---------------------------------------------------------------------------
 // Git hooks (commit-msg attribution scrubber, chained via core.hooksPath)
 // ---------------------------------------------------------------------------

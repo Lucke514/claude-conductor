@@ -1,5 +1,5 @@
 {
-  "description": "multi-provider: confirm write-mode delegations, verify worker diffs, health check on start, strip AI attribution from PR bodies/commits",
+  "description": "multi-provider: confirm write-mode delegations, verify worker diffs, auto-delegation on prompts (/mp-auto), health check on start, strip AI attribution from PR bodies/commits",
   "modules": [
     "./conductor/card.tsx"
   ],
@@ -34,6 +34,17 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs\" cli hook post-delegate",
             "timeout": 900
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs\" cli hook user-prompt-submit",
+            "timeout": 10
           }
         ]
       }

@@ -151,6 +151,13 @@ export async function setStatuslineMode(mode: "full" | "compact" | "off"): Promi
   });
 }
 
+export async function setAutoDelegate(enabled: boolean): Promise<string> {
+  return updateUserConfig((c) => {
+    const ad = (c.autoDelegate ??= {}) as Record<string, unknown>;
+    ad.enabled = enabled;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Git hooks (commit-msg attribution scrubber, chained via core.hooksPath)
 // ---------------------------------------------------------------------------

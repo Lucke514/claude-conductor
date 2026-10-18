@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { extractDelegateResult, postDelegate, preBash, preDelegate, splitCommand } from "../src/hooks.js";
-import { applySettings, installGitHooks, statuslineCommand, setStatuslineMode, uninstallGitHooks } from "../src/setup.js";
+import { AUTO_DELEGATE_CONTEXT, extractDelegateResult, postDelegate, preBash, preDelegate, splitCommand, userPromptSubmit } from "../src/hooks.js";
+import { applySettings, installGitHooks, setAutoDelegate, statuslineCommand, setStatuslineMode, uninstallGitHooks } from "../src/setup.js";
 import { makeRepo, tmpDir } from "./helpers.js";
 import { worktreesDir } from "../src/paths.js";
 
@@ -45,6 +45,25 @@ describe("PreToolUse(Bash)", () => {
   });
   it("is silent for other commands", async () => {
     expect(await preBash({ tool_input: { command: "ls -la" } })).toBeUndefined();
+  });
+});
+
+describe("UserPromptSubmit (auto-delegation)", () => {
+  it("injects the delegation instruction by default", async () => {
+    const out = (await userPromptSubmit({ cwd: tmpDir(), prompt: "revisa src/auth buscando race conditions" })) as any;
+    expect(out.hookSpecificOutput).toEqual({ hookEventName: "UserPromptSubmit", additionalContext: AUTO_DELEGATE_CONTEXT });
+  });
+  it("is silent for slash commands and empty prompts", async () => {
+    expect(await userPromptSubmit({ cwd: tmpDir(), prompt: "/mp-auto off" })).toBeUndefined();
+    expect(await userPromptSubmit({ cwd: tmpDir(), prompt: "  " })).toBeUndefined();
+  });
+  it("is silent when /mp-auto off", async () => {
+    writeFileSync(userConfig, JSON.stringify({ chain: ["codex", "claude"] }));
+    await setAutoDelegate(false);
+    expect(JSON.parse(readFileSync(userConfig, "utf8"))).toEqual({ chain: ["codex", "claude"], autoDelegate: { enabled: false } });
+    expect(await userPromptSubmit({ cwd: tmpDir(), prompt: "refactoriza pagos" })).toBeUndefined();
+    await setAutoDelegate(true);
+    expect(await userPromptSubmit({ cwd: tmpDir(), prompt: "refactoriza pagos" })).toBeDefined();
   });
 });
 
