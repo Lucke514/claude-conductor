@@ -84,7 +84,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 ## T5 — Delegación automática y confirmación en repos SDD
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C5 · **Implements**: R1, R2, E1
 - **Files**: `server/src/hooks.ts`, `server/tests/hooks-setup.spec.ts`
 - **Do**: añadir `isSddRepo`, el bloque SDD de `userPromptSubmit` y el aviso de `preDelegate` para `delegate` en write.
