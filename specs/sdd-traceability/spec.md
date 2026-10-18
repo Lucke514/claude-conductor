@@ -2,7 +2,7 @@
 
 # Spec: Pipeline y trazabilidad SDD
 
-> Status: approved
+> Status: implemented
 > Owner: Lucas Gonzalez Espinosa (@Lucke514)
 > Sign-off: — the session's user holds all of these
 > Tracking: — this project tracks work in the repo only
@@ -108,6 +108,7 @@ Hoy el estado de una feature solo se conoce leyendo sus archivos: en este mismo 
 - 2026-10-18 Plan aprobado por el usuario; Q2 se realiza con la card llamando a `sdd_feature_status` vía `$.mcp.call` (una sola implementación), porque el sandbox de mods no puede importar código del servidor.
 - 2026-10-18 Tasks aprobadas por el usuario.
 - 2026-10-18 R9: el ejemplo pasa de `▮▮▮▮▯▯` a `▮▮▮▯▯▯` para el 42 % — el original estaba mal calculado; la barra es el `bar()` de la card (6 × 0,42 = 2,5 → 3).
+- 2026-10-18 Verificación convergida (pass 1) y fusionado en `main` sin PR, a pedido del usuario; R7 (tarea en vivo) y SC3 (comparación con `/usage`) quedan como comprobación manual en la máquina del usuario.
 
 ## Open questions
 

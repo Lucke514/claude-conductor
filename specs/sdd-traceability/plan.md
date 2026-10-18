@@ -3,7 +3,7 @@
 # Plan: Pipeline y trazabilidad SDD
 
 > Spec: [spec.md](./spec.md)
-> Status: approved
+> Status: implemented
 > Last updated: 2026-10-18
 
 ## Approach
