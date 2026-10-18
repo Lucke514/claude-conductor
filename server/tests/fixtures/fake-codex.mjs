@@ -21,6 +21,15 @@ if (args[0] === "login" && args[1] === "status") {
   process.exit(0);
 }
 
+if (args[0] === "app-server") {
+  // Only FAKE_APPSERVER selects the JSON-RPC fake; otherwise behave like a codex without app-server.
+  if (process.env.FAKE_APPSERVER) {
+    await import("./fake-codex-app-server.mjs");
+  } else {
+    process.stderr.write("error: unrecognized subcommand 'app-server'\n");
+    process.exit(2);
+  }
+} else {
 if (process.env.FAKE_ARGS_FILE) writeFileSync(process.env.FAKE_ARGS_FILE, JSON.stringify(args));
 const cdIdx = args.indexOf("-C");
 const cwd = cdIdx >= 0 ? args[cdIdx + 1] : process.cwd();
@@ -147,3 +156,4 @@ process.stdin.on("end", () => {
       process.exit(99);
   }
 });
+}

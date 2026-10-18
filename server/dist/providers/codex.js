@@ -1,6 +1,7 @@
 import { effectiveErrorPatterns } from "../config.js";
 import { classifyFailure, excerpt } from "../fallback.js";
 import { findInPath, runProcess } from "../process.js";
+import { runAppServer, TransportUnavailable } from "./codex-app-server.js";
 export function parseCodexJsonl(stdout) {
     const parsed = { finalMessage: "", errors: [], invalidLines: 0, eventCount: 0 };
     let usage;
@@ -81,7 +82,22 @@ export class CodexAdapter {
         args.push("-");
         return args;
     }
+    /** `app-server` (default) with `exec` as the fallback when the transport cannot be used (E1). */
     async run(req) {
+        if ((this.cfg.transport ?? "app-server") === "app-server") {
+            try {
+                return await runAppServer(this.cfg, req, this.bin);
+            }
+            catch (err) {
+                if (!(err instanceof TransportUnavailable))
+                    throw err;
+                const r = await this.runExec(req);
+                return { ...r, notes: [`codex app-server unavailable (${err.message}); used codex exec`, ...(r.notes ?? [])] };
+            }
+        }
+        return this.runExec(req);
+    }
+    async runExec(req) {
         const patterns = effectiveErrorPatterns("codex", this.cfg);
         const r = await runProcess({
             command: this.bin,

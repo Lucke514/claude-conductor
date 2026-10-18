@@ -152,8 +152,8 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 
 ## T7 [P] — Codex por `app-server`
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C5 · **Implements**: R1, E1
 - **Files**: `server/src/providers/codex-app-server.ts`, `server/src/providers/codex.ts`, `server/tests/codex-app-server.spec.ts`, `server/tests/fixtures/fake-codex-app-server.mjs`
 - **Do**:
@@ -174,12 +174,12 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
   - `missing` usa `exec` con nota;
   - los tests existentes de codex siguen pasando.
 - **Verify**: `npm --prefix server test -- codex-app-server adapters`
-- **Notes**: —
+- **Notes**: Hecha por Claude. `server/src/providers/codex-app-server.ts` (`runAppServer`): cliente JSON-RPC por líneas con el protocolo de `codex app-server generate-json-schema` (codex-cli 0.158). Hace `initialize` con `optOutNotificationMethods` para los deltas, `thread/start { cwd, model, approvalPolicy: "never", sandbox, ephemeral: true }` y `turn/start`. Lee `item/completed` (`agentMessage` con preferencia por `phase: "final_answer"`), `thread/tokenUsage/updated` (total, con reasoning en la salida), `error` y `turn/completed`; `codexErrorInfo` se mapea a AUTH/QUOTA/RATE_LIMIT. Responde `-32601` a toda solicitud del servidor. Al cancelar o en stall/timeout envía `turn/interrupt` y espera su `turn/completed` hasta 5 s antes de matar; sin turno, mata al momento. `CodexAdapter.run` usa `app-server` por defecto y cae a `runExec` con nota ante `TransportUnavailable` (sin binario, `initialize` fallido o `-32601` en `thread/start`). Fakes: `fake-codex.mjs` rechaza `app-server` salvo con `FAKE_APPSERVER`, lo que ejercita el fallback en todos los tests viejos, y `fake-codex-app-server.mjs`. Smoke real en la máquina del usuario: codex `app-server` read → `OK` en 4,5 s con uso y progreso, sin fallback; agy `stream-json` write con un `run_command` → `DONE` en 12 s, sin PTY ni cuelgue. Tests: 7 en `codex-app-server.spec.ts`. Gates: typecheck 0 errores, 269 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: los timers de parada repiten el patrón de `stopper()` de `process.ts` — se queda: aquí la parada es interrumpir y esperar, no matar un proceso
 
 ## T8 — `/mp-doctor`: transporte y flags
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C7 · **Implements**: E1, E2
 - **Files**: `server/src/doctor.ts`, `server/tests/doctor.spec.ts`
 - **Do**: Agregar dos checks a `/mp-doctor`:
@@ -194,7 +194,7 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 ## T9 — Document the feature
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C7 · **Implements**: all (documentation)
 - **Files**: `docs/provider-reliability.md`, `README.md`, `skills/multi-provider/SKILL.md`, `agents/codex-worker.md`, `agents/agy-worker.md`
 - **Do**:

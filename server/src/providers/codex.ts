@@ -1,6 +1,7 @@
 import { effectiveErrorPatterns, type ProviderConfig } from "../config.js";
 import { classifyFailure, excerpt } from "../fallback.js";
 import { findInPath, runProcess } from "../process.js";
+import { runAppServer, TransportUnavailable } from "./codex-app-server.js";
 import type { HealthReport, ProviderAdapter, ProviderRequest, ProviderResult, TokenUsage } from "./types.js";
 
 /**
@@ -114,7 +115,21 @@ export class CodexAdapter implements ProviderAdapter {
     return args;
   }
 
+  /** `app-server` (default) with `exec` as the fallback when the transport cannot be used (E1). */
   async run(req: ProviderRequest): Promise<ProviderResult> {
+    if ((this.cfg.transport ?? "app-server") === "app-server") {
+      try {
+        return await runAppServer(this.cfg, req, this.bin);
+      } catch (err) {
+        if (!(err instanceof TransportUnavailable)) throw err;
+        const r = await this.runExec(req);
+        return { ...r, notes: [`codex app-server unavailable (${err.message}); used codex exec`, ...(r.notes ?? [])] };
+      }
+    }
+    return this.runExec(req);
+  }
+
+  async runExec(req: ProviderRequest): Promise<ProviderResult> {
     const patterns = effectiveErrorPatterns("codex", this.cfg);
     const r = await runProcess({
       command: this.bin,
