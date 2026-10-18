@@ -37,7 +37,8 @@
     "mode": "compact"
   },
   "card": {
-    "enabled": true
+    "enabled": true,
+    "placement": "side"
   },
   "providers": {
     "codex": {
