@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { QualityGate, SddTask } from "../src/sdd/artifacts.js";
 import { baselineIsClean, shellSyntax, verifyTask } from "../src/sdd/verify.js";
+import { parseTasks } from "../src/sdd/artifacts.js";
 import { tmpDir } from "./helpers.js";
 
 const task = (verify: string[], text = verify.map((v) => `\`${v}\``).join(" · ")): SddTask => ({
@@ -25,6 +26,18 @@ const gate = (name: string, command: string, baseline: string, where = "`here`")
 });
 
 describe("sdd verification", () => {
+  it("nested-repos R10/SC7: a Verify with two backticked commands runs both, one item each; one backtick with && stays manual", async () => {
+    const [t] = parseTasks('## T1 — x\n\n- [ ] Open\n- **Verify**: `node -e "process.exit(0)"` y `node -e "console.log(2)"`\n');
+    expect(t!.verifyCommands).toEqual(['node -e "process.exit(0)"', 'node -e "console.log(2)"']);
+    const items = await verifyTask(tmpDir(), t!, [], 30_000);
+    expect(items.map((i) => [i.kind, i.result])).toEqual([
+      ["verify", "pass"],
+      ["verify", "pass"],
+    ]);
+    const [chained] = await verifyTask(tmpDir(), task(['node -e "1" && node -e "2"']), [], 30_000);
+    expect(chained).toMatchObject({ kind: "verify", result: "manual", reason: expect.stringContaining("&&") });
+  });
+
   it("R7: runs Verify and gates without a shell, with output and new-failure verdicts", async () => {
     const dir = tmpDir();
     const items = await verifyTask(

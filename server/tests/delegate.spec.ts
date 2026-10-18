@@ -564,6 +564,19 @@ describe("nested-repos R8: chainByMode", () => {
     expect(a.calls).toEqual(["codex", "antigravity"]);
   });
 
+  it("R9/SC6: a fallback answer carries requestedProvider and an explicit note; a direct one carries no note", async () => {
+    const a = adapters();
+    const r = await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo()), adapters: a.adapters });
+    expect(r).toMatchObject({ requestedProvider: "codex", provider: "antigravity", status: "success" });
+    expect(r.notes).toContain("requested codex, answered by antigravity (fallback after codex: AUTH)");
+    const auto = await delegate({ provider: "auto", task: "t" }, { ...ctx(makeRepo()), adapters: adapters().adapters });
+    expect(auto.requestedProvider).toBe("auto");
+    expect(auto.notes).toContain("requested codex, answered by antigravity (fallback after codex: AUTH)");
+    const direct = await delegate({ provider: "antigravity", task: "t" }, { ...ctx(makeRepo()), adapters: adapters().adapters });
+    expect(direct.requestedProvider).toBe("antigravity");
+    expect(direct.notes ?? []).not.toContainEqual(expect.stringContaining("answered by"));
+  });
+
   it("an explicit provider outside the mode's chain is tried first; an auto route outside it is ignored with a note", async () => {
     let a = adapters();
     const r = await delegate({ provider: "antigravity", task: "t" }, { ...ctx(makeRepo(), byMode), adapters: a.adapters });

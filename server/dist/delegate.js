@@ -211,6 +211,7 @@ export async function delegate(params, ctx) {
         async function finish(r) {
             const response = {
                 id,
+                requestedProvider: params.provider,
                 mode,
                 ...(target ? { repo: target.rel } : {}),
                 files: built.files,
@@ -220,6 +221,13 @@ export async function delegate(params, ctx) {
             };
             if (routing)
                 response.routing = { rule: routing.rule, provider: routing.provider };
+            // R9: say plainly when another provider answered, so reports never credit the one asked for.
+            const expected = params.provider === "auto" ? (routing?.provider ?? order.find((p) => p !== "claude")) : params.provider;
+            if (r.provider && expected && r.provider !== expected) {
+                const failed = r.attempts.find((a) => a.provider === expected);
+                const why = failed?.errorType ?? failed?.skipped;
+                notes.push(`requested ${expected}, answered by ${r.provider} (fallback${why ? ` after ${expected}: ${why}` : ""})`);
+            }
             if (kept && (r.status === "success" || r.status === "cancelled" || r.status === "partial")) {
                 response.diff = kept.changes.diff;
                 response.diffTruncated = kept.changes.truncated;

@@ -6,6 +6,7 @@ import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
 import { parseAcceptance, sddTaskClaim, sddTaskDelegate, sddTaskRelease } from "../src/sdd/task-delegation.js";
 import { applyWorktree, removeWorktree, readMeta } from "../src/worktree.js";
+import type { ProviderAdapter, ProviderName } from "../src/providers/types.js";
 import { makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
 import { PLAN, SPEC, TASKS, writeFeature } from "./sdd-fixtures.js";
 
@@ -171,6 +172,23 @@ describe("sdd_task_* tools", () => {
     expect(await sddTaskRelease({ slug: "demo", task: "T3" }, s.ctx)).toMatchObject({ released: false });
     await expect(sddTaskDelegate({ slug: "demo", task: "next" }, s.ctx)).rejects.toThrow(/not 'next'/);
     await expect(sddTaskDelegate({ slug: "demo", task: "T3" }, s.ctx)).rejects.toThrow(/owned by '—'/);
+  });
+
+  it("nested-repos R9/SC6: the task claimed for codex but answered by antigravity says so", async () => {
+    const s = setup(TASKS, { chain: ["codex", "antigravity", "claude"] });
+    await claimAndCommit(s);
+    const make = (name: ProviderName, ok: boolean): ProviderAdapter => ({
+      name,
+      isAvailable: async () => true,
+      healthCheck: async () => ({}) as never,
+      run: async () =>
+        ok
+          ? { ok: true, output: WORKER, exitCode: 0, durationMs: 1 }
+          : { ok: false, output: "", exitCode: 1, durationMs: 1, error: { type: "AUTH", message: "401 Unauthorized" } },
+    });
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, { ...s.ctx, adapters: { codex: make("codex", false), antigravity: make("antigravity", true) } });
+    expect(r).toMatchObject({ requestedProvider: "codex", provider: "antigravity" });
+    expect(r.notes).toContain("requested codex, answered by antigravity (fallback after codex: AUTH)");
   });
 
   it("auto claims for the routed provider, else the first of the chain", async () => {

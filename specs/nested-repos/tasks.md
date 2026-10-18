@@ -145,8 +145,8 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
 
 ## T7 — `requestedProvider` y `Verify` con varios comandos
 
-- [ ] Open
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C7 · **Implements**: R9, R10
 - **Files**: `server/src/delegate.ts`, `server/src/state.ts`, `server/src/sdd/task-delegation.ts`, `server/tests/delegate.spec.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/sdd-artifacts.spec.ts`, `server/tests/sdd-verify.spec.ts`
 - **Do**:
@@ -160,11 +160,12 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
   - SC7: un `Verify` `` `node -e "process.exit(0)"` y `node -e "process.exit(0)"` `` da dos ítems `kind: "verify"` que pasan;
   - un único backtick con `&&` queda `manual`.
 - **Verify**: `npm --prefix server test -- delegate sdd`
+- **Notes**: Hecha por Claude. `DelegateResponse.requestedProvider` = `params.provider` (en `sdd_task_delegate`, el proveedor del Owner). Si quien respondió no es el esperado (el explícito, el ruteado en `auto` o el primero de la cadena del modo), se añade la nota `requested <x>, answered by <y> (fallback after <x>: <errorType|skipped>)`. `recent.requested` y el audit ya guardaban lo pedido, así que `state.ts` no cambió. R10 ya funcionaba y queda fijado por un test en `sdd-verify.spec.ts` (dos comandos → dos ítems; `&&` en un backtick → `manual`). Tests: SC6 en `delegate.spec.ts` y en `sdd-task-delegation.spec.ts`, SC7 en `sdd-verify.spec.ts`. Gates: typecheck 0 errores, 306 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: none
 
 ## T8 — `/mp-doctor`: repos anidados y aislamiento de lectura
 
 - [ ] Open
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C8 · **Implements**: R12
 - **Files**: `server/src/doctor.ts`, `server/tests/doctor.spec.ts`
 - **Do**:

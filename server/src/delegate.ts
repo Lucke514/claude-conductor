@@ -38,6 +38,8 @@ export type DelegateStatus = "success" | "fallback_to_claude" | "failed" | "canc
 
 export interface DelegateResponse {
   id: string;
+  /** What was asked for: `auto`, the explicit provider, or (sdd_task_delegate) the Owner's (nested-repos R9). */
+  requestedProvider: ProviderName | "auto";
   provider: ProviderName | null;
   model: string | null;
   status: DelegateStatus;
@@ -291,6 +293,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     ): Promise<DelegateResponse> {
       const response: DelegateResponse = {
         id,
+        requestedProvider: params.provider,
         mode,
         ...(target ? { repo: target.rel } : {}),
         files: built.files,
@@ -299,6 +302,13 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
         ...r,
       };
       if (routing) response.routing = { rule: routing.rule, provider: routing.provider };
+      // R9: say plainly when another provider answered, so reports never credit the one asked for.
+      const expected = params.provider === "auto" ? (routing?.provider ?? order.find((p): p is ProviderName => p !== "claude")) : params.provider;
+      if (r.provider && expected && r.provider !== expected) {
+        const failed = r.attempts.find((a) => a.provider === expected);
+        const why = failed?.errorType ?? failed?.skipped;
+        notes.push(`requested ${expected}, answered by ${r.provider} (fallback${why ? ` after ${expected}: ${why}` : ""})`);
+      }
       if (kept && (r.status === "success" || r.status === "cancelled" || r.status === "partial")) {
         response.diff = kept.changes.diff;
         response.diffTruncated = kept.changes.truncated;
