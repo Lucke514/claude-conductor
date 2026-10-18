@@ -1,7 +1,7 @@
 {
   "name": "multi-provider",
   "displayName": "Multi-provider delegation",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Delegate tasks from Claude Code to local AI CLIs (OpenAI Codex `codex exec`, Google Antigravity `agy -p`) with fallback, circuit breaker, isolated git worktrees and Claude as supervisor.",
   "author": {
     "name": "Lucas Gonzalez Espinosa",
