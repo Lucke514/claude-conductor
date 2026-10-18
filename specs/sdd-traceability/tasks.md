@@ -97,7 +97,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 ## T5 — Herramienta `sdd_feature_status` y `/sdd-status`
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C3 · **Implements**: R6, E3, E9
 - **Files**: `server/src/index.ts`, `commands/sdd-status.md`, `server/tests/sdd-pipeline.spec.ts`
 - **Do**:
