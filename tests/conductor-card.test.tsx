@@ -163,6 +163,36 @@ describe('conductor header', () => {
     await ui.unmount()
   })
 
+  test('SDD lines from the server pipeline', async ($, on) => {
+    const FEATURES = [
+      { slug: 'sdd-traceability', stage: 'Implementación', closed: 5, total: 7, current: { id: 'T6', owner: 'codex (multi-provider) since 2026-10-18' }, warnings: 1, nextStep: '' },
+      { slug: 'sdd-guardrails', stage: 'Cerrada', closed: 7, total: 7, warnings: 0, nextStep: '' },
+    ]
+    const clock = world(on, FILES)
+    on('mcp.connect', async () => ({ value: { isConnected: true, server: 'plugin:multi-provider:multi-provider' } }))
+    on('mcp.call', async ($, e) => {
+      if (e.tool !== 'sdd_feature_status') return { deny: 'unexpected tool' }
+      return { value: { isError: false, content: [{ type: 'text', text: JSON.stringify({ features: FEATURES, notes: [] }) }] } }
+    })
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await clock.advance(10)
+    const t = await text(ui)
+    expect(t).toContain('sdd-traceability ▸ Impl 5/7 · ⚠ 1')
+    expect(t).toContain('/sdd-status')
+    expect(t).not.toContain('sdd-guardrails ▸')
+    expect(t).not.toContain('T2 en curso')
+    await ui.unmount()
+  })
+
+  test('SDD line falls back to tasks.md when the server is not connected', async ($, on) => {
+    const clock = world(on, FILES)
+    on('mcp.connect', async () => ({ value: { isConnected: false, reason: 'missing', message: 'not connected' } }))
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await clock.advance(10)
+    expect(await text(ui)).toContain('T2 en curso')
+    await ui.unmount()
+  })
+
   test('first use teaches the next step', async ($, on) => {
     const fresh = { chain: STATE.chain, providers: { codex: { health: { installed: true, enabled: true, auth: 'ok' } }, antigravity: { health: { installed: true, enabled: true, auth: 'unknown' } } } }
     const clock = world(on, { '/home/u/.claude/multi-provider/state.json': fresh })

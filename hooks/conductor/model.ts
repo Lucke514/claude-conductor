@@ -60,6 +60,9 @@ export interface Running {
   mode: string;
   task: string;
   startedAt: number;
+  /** Set for sdd_task_delegate: the feature and task being worked on. */
+  slug?: string;
+  taskId?: string;
 }
 
 export interface SessionTally {
@@ -410,6 +413,53 @@ export function specProgress(slug: string, md: string): SpecProgress {
   if (claimed) progress.current = { ...claimed, state: "en curso" };
   else if (next) progress.current = { ...next, state: "siguiente" };
   return progress;
+}
+
+/** One feature as the sdd_feature_status tool summarizes it. */
+export interface PipelineFeature {
+  slug: string;
+  stage: string;
+  substage?: string;
+  closed: number;
+  total: number;
+  current?: { id: string; owner: string | null };
+  warnings: number;
+  nextStep: string;
+}
+
+export interface PipelineLine {
+  slug: string;
+  /** "sdd-traceability ▸ Impl 3/8 · codex T4 ⏳ · ⚠ 1" */
+  text: string;
+  running: boolean;
+  warn: boolean;
+}
+
+const STAGE_SHORT: Record<string, string> = { "Implementación": "Impl", "Verificación": "Verif" };
+
+/**
+ * Features in implementation or verification, at most `max`, with the live delegation and warnings.
+ * A line longer than `width` shortens the slug, never the stage, the task or the warning count.
+ */
+export function pipelineView(features: PipelineFeature[], running?: Running | null, max = 3, width = 44): PipelineLine[] {
+  return features
+    .filter((f) => STAGE_SHORT[f.stage])
+    .slice(0, max)
+    .map((f) => {
+      const live = running?.taskId && running.slug === f.slug ? `${SHORT[running.provider] ?? running.provider} ${running.taskId} ⏳` : undefined;
+      const parts = [`▸ ${STAGE_SHORT[f.stage]} ${f.closed}/${f.total}`];
+      if (live) parts.push(live);
+      if (f.warnings > 0) parts.push(`⚠ ${f.warnings}`);
+      const rest = parts.join(" · ");
+      const room = Math.max(4, width - rest.length - 1);
+      const slug = f.slug.length > room ? `${f.slug.slice(0, room - 1)}…` : f.slug;
+      return { slug: f.slug, text: `${slug} ${rest}`, running: !!live, warn: f.warnings > 0 };
+    });
+}
+
+/** The worker a task's Owner names ("codex (multi-provider) since …" → "codex"). */
+export function ownerProvider(owner: string | null | undefined): string | undefined {
+  return owner?.match(/^(codex|antigravity|agy)\b/i)?.[1]?.toLowerCase();
 }
 
 /** The feature being worked on: one with a claimed task, else an approved one with open tasks. */

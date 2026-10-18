@@ -113,8 +113,8 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
 
 ## T6 — Líneas SDD en la card
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C4 · **Implements**: R7, E3, E6, E9
 - **Files**: `hooks/conductor/model.ts`, `hooks/conductor/card.tsx`, `types/index.d.ts`, `server/tests/card-model.spec.ts`, `tests/conductor-card.test.tsx`
 - **Do**:
@@ -132,7 +132,7 @@ Orden: T1, T3 y T4 pueden correr a la vez (no comparten archivos); T2 espera a T
   - con `$.mcp.call` rechazando se dibuja la línea de `specProgress` (E6);
   - los tests existentes de la card siguen pasando.
 - **Verify**: `npm --prefix server test -- card-model` · `claude plugin test .` · manual: `claude --plugin-dir .` en este repo muestra `sdd-task-delegation ▸ Verif …`
-- **Notes**: —
+- **Notes**: Hecha por Claude en la sesión principal. En `model.ts`: `pipelineView` (hasta 3 features en Impl/Verif; si la línea pasa de 44 columnas acorta el slug y conserva etapa, tarea y avisos) y `ownerProvider`. En `card.tsx`: `loadSpec` llama a `sdd_feature_status` vía `$.mcp.connect`/`$.mcp.call`, sin llamar si hay una pendiente, y cae a `specProgress` si el servidor no responde. El hook `tool.call` ahora también escucha `sdd_task_delegate` (`markSddStart`, con el proveedor tomado del Owner): arregla que la card no mostrara esas llamadas. El átomo `spec` es `SpecView` en `types/index.d.ts`. Tests: 4 casos en `card-model.spec.ts` y 2 en `conductor-card.test.tsx` (pipeline del servidor y fallback). Gates: typecheck 0 errores, 236 passed, plugin validate ok, plugin test 11 pass. Pendiente manual: la tarea en vivo durante un `sdd_task_delegate` real con `claude --plugin-dir .`, porque el harness de tests no atiende `$.tool.call` de una herramienta MCP; la lógica la cubre `pipelineView` con `running`. Clean-code: el slug se acorta en `pipelineView` en lugar de un `slice` en la card, que cortaba el número del aviso · close calls: none
 
 ## T7 — Document the feature
 

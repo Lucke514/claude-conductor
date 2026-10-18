@@ -9,7 +9,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, RenderElement, RenderInput, ToolCallResult } from 'claude-code'
 
-import type { Cleaned, Placement, Running, SessionMeta, SessionTally, SpecProgress, StateFile } from '../../types'
+import type { Cleaned, PipelineFeature, Placement, Running, SessionMeta, SessionTally, SpecProgress, SpecView, StateFile } from '../../types'
 import {
   bar,
   buildCard,
@@ -17,10 +17,12 @@ import {
   fmtCost,
   fmtDuration,
   fmtTokens,
+  ownerProvider,
   pad,
   PALETTE,
   parseVerdict,
   pickActiveSpec,
+  pipelineView,
   prettyModel,
   rateLimitText,
   rateLimitView,
@@ -125,8 +127,45 @@ async function loadMeta($: EngineInterface): Promise<void> {
   if (JSON.stringify(await read($, meta)) !== JSON.stringify(next)) await update($, meta, () => next)
 }
 
-/** The active spec-driven feature, from specs/<slug>/tasks.md (or a Small spec.md). */
+// The plugin's own MCP server, as `$.mcp.call` names it, once connected.
+let mcpServer: string | undefined
+let pipelineInFlight = false
+
+/** Every feature's stage from the server's sdd_feature_status: the same logic as /sdd-status. */
+async function loadPipeline($: EngineInterface): Promise<PipelineFeature[] | undefined> {
+  if (!mcpServer) {
+    const c = await $.mcp.connect('multi-provider')
+    if (!c.isConnected) return undefined
+    mcpServer = c.server
+  }
+  const res = await $.mcp.call(mcpServer, 'sdd_feature_status', {})
+  if (res.isError) return undefined
+  const block = res.content.find(b => b.type === 'text') as { text?: string } | undefined
+  const body = JSON.parse(block?.text ?? '') as { features?: PipelineFeature[] }
+  return Array.isArray(body.features) ? body.features : undefined
+}
+
+/** The SDD line: the server's pipeline, else the active feature from specs/<slug>/tasks.md. */
 async function loadSpec($: EngineInterface): Promise<void> {
+  // A call still waiting keeps the line as it is; the next 15-second tick tries again.
+  if (pipelineInFlight) return
+  pipelineInFlight = true
+  let value: SpecView | null
+  try {
+    const features = await loadPipeline($).catch(() => undefined)
+    if (features) value = { features }
+    else {
+      const progress = await loadProgress($)
+      value = progress ? { progress } : null
+    }
+  } finally {
+    pipelineInFlight = false
+  }
+  if (JSON.stringify(await read($, spec)) !== JSON.stringify(value)) await update($, spec, () => value)
+}
+
+/** The active spec-driven feature, from specs/<slug>/tasks.md (or a Small spec.md). */
+async function loadProgress($: EngineInterface): Promise<SpecProgress | undefined> {
   let found: SpecProgress | undefined
   try {
     const dirs = (await $.fs.list('specs')).filter(d => d.kind === 'dir')
@@ -149,8 +188,7 @@ async function loadSpec($: EngineInterface): Promise<void> {
   } catch {
     /* no specs/ in this project */
   }
-  const value = found ?? null
-  if (JSON.stringify(await read($, spec)) !== JSON.stringify(value)) await update($, spec, () => value)
+  return found
 }
 
 function resultText(res: ToolCallResult): string {
@@ -164,6 +202,23 @@ async function markStart($: EngineInterface, e: unknown): Promise<void> {
     mode: args.mode ?? 'read',
     task: (args.task ?? '').replace(/\s+/g, ' ').slice(0, 70),
     startedAt: await $.clock.now(),
+  }
+  await update($, running, () => r)
+}
+
+/** sdd_task_delegate: the worker is the one its claim named in the task's Owner. */
+async function markSddStart($: EngineInterface, e: unknown): Promise<void> {
+  const args = e as { slug?: string; task?: string; mode?: string }
+  const view: SpecView | null = await read($, spec)
+  const feature = view && 'features' in view ? view.features.find(f => f.slug === args.slug) : undefined
+  const owner = feature?.current?.id === args.task ? feature.current.owner : undefined
+  const r: Running = {
+    provider: ownerProvider(owner) ?? 'auto',
+    mode: args.mode ?? 'write',
+    task: `${args.slug ?? ''} ${args.task ?? ''}`.trim(),
+    startedAt: await $.clock.now(),
+    ...(args.slug ? { slug: args.slug } : {}),
+    ...(args.task ? { taskId: args.task } : {}),
   }
   await update($, running, () => r)
 }
@@ -267,7 +322,9 @@ async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pa
     tick: await read($, tick),
   })
   const m: SessionMeta = await read($, meta)
-  const active: SpecProgress | null = await read($, spec)
+  const specView: SpecView | null = await read($, spec)
+  const active = specView && 'progress' in specView ? specView.progress : null
+  const pipeline = specView && 'features' in specView ? pipelineView(specView.features, await read($, running)) : []
   const wasCleaned: Cleaned | null = await read($, cleaned)
   const { Box, Text, Button } = $.ui.resolve(e)
   const wide = e.props.bodyColumns >= 100
@@ -350,6 +407,14 @@ async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pa
       <Text color={MUTED}>{active.current ? active.current.title.slice(0, 34) : ' '}</Text>
       <Text color={PALETTE.dim}>{active.current && active.current.owner !== '—' ? `owner ${active.current.owner}`.slice(0, 34) : 'sin owner'}</Text>
       <Text color={PALETTE.dim}>{active.current ? `/sdd-delegate ${active.slug} next` : ' '}</Text>
+    </Box>
+  ) : pipeline.length > 0 ? (
+    <Box key="card-spec" flexDirection="column" borderStyle="round" borderColor="#262C35" paddingX={1} flexGrow={1}>
+      <Text color={STRONG} bold>spec-driven</Text>
+      {pipeline.map(l => (
+        <Text key={`p-${l.slug}`} color={l.running ? PALETTE.brass : l.warn ? PALETTE.warn : MUTED}>{l.text}</Text>
+      ))}
+      <Text color={PALETTE.dim}>/sdd-status</Text>
     </Box>
   ) : null
 
@@ -539,9 +604,16 @@ export const register: Register = on => {
   })
 
   // The plugin's server, and the same server when the repo is opened as a project.
-  for (const tool of ['mcp__plugin_multi-provider_multi-provider__delegate', 'mcp__multi-provider__delegate']) {
+  for (const tool of [
+    'mcp__plugin_multi-provider_multi-provider__delegate',
+    'mcp__multi-provider__delegate',
+    'mcp__plugin_multi-provider_multi-provider__sdd_task_delegate',
+    'mcp__multi-provider__sdd_task_delegate',
+  ]) {
+    const isSdd = tool.endsWith('sdd_task_delegate')
     on('tool.call', { tool }, async ($, e, next) => {
-      await markStart($, e).catch(() => undefined)
+      if (isSdd) await markSddStart($, e).catch(() => undefined)
+      else await markStart($, e).catch(() => undefined)
       try {
         const res = await next(e)
         await markDone($, res).catch(() => undefined)

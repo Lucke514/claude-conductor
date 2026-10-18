@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bar, buildCard, ctxBar, fmtClock, fmtCost, fmtDuration, fmtTokens, outcomeOf, parseTasks, parseVerdict, pickActiveSpec, prettyModel, providerView, rateLimitText, rateLimitView, sparkline, specProgress } from "../../hooks/conductor/model.js";
+import { bar, buildCard, ctxBar, fmtClock, fmtCost, fmtDuration, fmtTokens, outcomeOf, ownerProvider, parseTasks, parseVerdict, pickActiveSpec, pipelineView, prettyModel, providerView, rateLimitText, rateLimitView, sparkline, specProgress } from "../../hooks/conductor/model.js";
 
 const NOW = Date.parse("2026-10-18T12:00:00Z");
 const TODAY = "2026-10-18";
@@ -182,5 +182,36 @@ describe("rate-limit windows", () => {
     expect(rateLimitText(spend!)).toBe("gasto ▮▮▮▮▮▮ 112%");
     expect(spend!.tone).toBe("error");
     expect(rateLimitText(other!)).toBe("monthly ▯▯▯▯▯▯ 3%");
+  });
+});
+
+describe("SDD pipeline lines", () => {
+  const f = (slug: string, stage: string, warnings = 0) => ({ slug, stage, closed: 3, total: 8, warnings, nextStep: "" });
+
+  it("R7: at most 3 features in Implementación/Verificación, with the live task and warnings", () => {
+    const features = [f("a", "Implementación"), f("b", "Cerrada"), f("c", "Verificación", 1), f("d", "Implementación"), f("e", "Implementación")];
+    const running = { provider: "antigravity", mode: "write", task: "a T4", startedAt: NOW, slug: "a", taskId: "T4" };
+    const lines = pipelineView(features, running);
+    expect(lines.map((l) => l.text)).toEqual(["a ▸ Impl 3/8 · agy T4 ⏳", "c ▸ Verif 3/8 · ⚠ 1", "d ▸ Impl 3/8"]);
+    expect(lines.map((l) => [l.running, l.warn])).toEqual([[true, false], [false, true], [false, false]]);
+  });
+
+  it("E3: no active feature → no lines; a plain delegate does not mark a feature", () => {
+    expect(pipelineView([f("b", "Cerrada"), f("s", "Spec")], null)).toEqual([]);
+    expect(pipelineView([f("a", "Implementación")], { provider: "codex", mode: "read", task: "x", startedAt: NOW })[0]!.running).toBe(false);
+  });
+
+  it("R7: a long line shortens the slug and keeps stage, task and warnings", () => {
+    const running = { provider: "codex", mode: "write", task: "", startedAt: NOW, slug: "sdd-traceability", taskId: "T6" };
+    const [line] = pipelineView([{ slug: "sdd-traceability", stage: "Implementación", closed: 5, total: 7, warnings: 1, nextStep: "" }], running);
+    expect(line!.text).toBe("sdd-traceabil… ▸ Impl 5/7 · codex T6 ⏳ · ⚠ 1");
+    expect(line!.text.length).toBeLessThanOrEqual(44);
+  });
+
+  it("ownerProvider reads the worker from a claim", () => {
+    expect(ownerProvider("codex (multi-provider) since 2026-10-18")).toBe("codex");
+    expect(ownerProvider("antigravity (multi-provider) since 2026-10-18")).toBe("antigravity");
+    expect(ownerProvider("claude (sesión principal)")).toBeUndefined();
+    expect(ownerProvider(null)).toBeUndefined();
   });
 });
