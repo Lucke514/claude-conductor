@@ -18,6 +18,8 @@ const check = (r: DoctorReport, name: string) => r.checks.find((c) => c.name ===
 afterEach(() => {
   delete process.env.FAKE_MODE;
   delete process.env.FAKE_AUTH;
+  delete process.env.FAKE_APPSERVER;
+  delete process.env.FAKE_AGY_HELP;
 });
 
 describe("doctor", () => {
@@ -31,6 +33,19 @@ describe("doctor", () => {
     expect(check(r, "antigravity: install & auth")?.level).toBe("warn");
     expect(check(r, "codex: live run")).toMatchObject({ level: "ok" });
     expect(check(r, "antigravity: live run")).toMatchObject({ level: "ok" });
+  });
+
+  it("E1/E2: reports codex's effective transport and agy's flags, each with a fix", async () => {
+    let r = await runDoctor({ projectDir: project(), store: new StateStore(), live: false });
+    expect(check(r, "codex: transport")).toMatchObject({ level: "warn", detail: expect.stringContaining("exec") });
+    expect(check(r, "codex: transport")?.fix).toContain("transport");
+    expect(check(r, "antigravity: flags")?.level).toBe("ok");
+    process.env.FAKE_APPSERVER = "ok";
+    process.env.FAKE_AGY_HELP = "old";
+    r = await runDoctor({ projectDir: project(), store: new StateStore(), live: false });
+    expect(check(r, "codex: transport")).toMatchObject({ level: "ok", detail: expect.stringContaining("app-server") });
+    expect(check(r, "antigravity: flags")).toMatchObject({ level: "warn", detail: expect.stringContaining("stream-json") });
+    expect(r.ok).toBe(true);
   });
 
   it("reports missing auth with its fix and skips the live run", async () => {

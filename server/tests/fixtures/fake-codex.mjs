@@ -23,7 +23,10 @@ if (args[0] === "login" && args[1] === "status") {
 
 if (args[0] === "app-server") {
   // Only FAKE_APPSERVER selects the JSON-RPC fake; otherwise behave like a codex without app-server.
-  if (process.env.FAKE_APPSERVER) {
+  if (process.env.FAKE_APPSERVER && args[1] === "--help") {
+    process.stdout.write("Usage: codex app-server [OPTIONS]\n");
+    process.exit(0);
+  } else if (process.env.FAKE_APPSERVER) {
     await import("./fake-codex-app-server.mjs");
   } else {
     process.stderr.write("error: unrecognized subcommand 'app-server'\n");

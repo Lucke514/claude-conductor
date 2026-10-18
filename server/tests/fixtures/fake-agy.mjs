@@ -11,6 +11,11 @@ if (args[0] === "--version") {
   process.stdout.write("1.3.6\n");
   process.exit(0);
 }
+if (args[0] === "--help") {
+  // An old agy (FAKE_AGY_HELP=old) lists neither flag the defaults rely on.
+  process.stdout.write(process.env.FAKE_AGY_HELP === "old" ? "Usage: agy -p <prompt>\n" : "  --dangerously-skip-permissions  Auto-approve\n  --output-format  (text, json, stream-json)\n");
+  process.exit(0);
+}
 if (process.env.FAKE_ARGS_FILE) writeFileSync(process.env.FAKE_ARGS_FILE, JSON.stringify({ args, tty: !!process.stdout.isTTY }));
 
 const pIdx = args.indexOf("-p");

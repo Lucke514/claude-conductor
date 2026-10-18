@@ -178,8 +178,8 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 
 ## T8 — `/mp-doctor`: transporte y flags
 
-- [ ] Done
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C7 · **Implements**: E1, E2
 - **Files**: `server/src/doctor.ts`, `server/tests/doctor.spec.ts`
 - **Do**: Agregar dos checks a `/mp-doctor`:
@@ -189,7 +189,7 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
   La ejecución real de una línea usa el adapter con el transporte efectivo.
 - **Acceptance**: Con los fakes, el doctor reporta `app-server` o `exec` según el modo, y marca el flag ausente de agy con su `fix`. `--json` incluye los dos checks.
 - **Verify**: `npm --prefix server test -- doctor`
-- **Notes**: —
+- **Notes**: Hecha por Claude. En `server/src/doctor.ts`: `codexTransportCheck` (`codex app-server --help` → `app-server`; si falla, `warn` con exec y fix; `transport: "exec"` configurado → ok) y `agyFlagsCheck` (`agy --help` debe listar `stream-json` y `--dangerously-skip-permissions` salvo que la config los reemplace). El check de node-pty solo corre si agy usa PTY, lo que ya no ocurre por defecto. La ejecución real de una línea usa el adapter, por lo que prueba el transporte efectivo. Los fakes responden `--help`. Tests: 1 en `doctor.spec.ts` (los dos estados de cada check). Gates: typecheck 0 errores, 270 passed, plugin validate ok. Clean-code: none · close calls: none
 
 ## T9 — Document the feature
 
