@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bar, buildCard, ctxBar, fmtClock, fmtCost, fmtDuration, fmtTokens, outcomeOf, parseTasks, parseVerdict, pickActiveSpec, providerView, sparkline, specProgress } from "../../hooks/conductor/model.js";
+import { bar, buildCard, ctxBar, fmtClock, fmtCost, fmtDuration, fmtTokens, outcomeOf, parseTasks, parseVerdict, pickActiveSpec, prettyModel, providerView, sparkline, specProgress } from "../../hooks/conductor/model.js";
 
 const NOW = Date.parse("2026-10-18T12:00:00Z");
 const TODAY = "2026-10-18";
@@ -143,5 +143,13 @@ describe("conductor card model", () => {
     expect(fmtCost(0.5)).toBe("$0.50");
     expect(fmtCost(undefined)).toBe("");
   });
-});
 
+  it("shows model ids by family and version", () => {
+    expect(prettyModel("claude-sonnet-5-5")).toBe("Sonnet 5.5");
+    expect(prettyModel("claude-opus-5-5[1m]")).toBe("Opus 5.5");
+    expect(prettyModel("claude-haiku-5-5-20261001")).toBe("Haiku 5.5");
+    expect(prettyModel("Opus 5.5")).toBe("Opus 5.5");
+    expect(prettyModel("gpt-5")).toBe("gpt-5");
+    expect(prettyModel(undefined)).toBeUndefined();
+  });
+});

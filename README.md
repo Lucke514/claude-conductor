@@ -76,6 +76,7 @@ Ejemplo completo: [`config/multiprovider.example.json`](config/multiprovider.exa
 | `verify.commands` | `[]` | Ej. `["npm run lint","npm test"]`. Se ejecutan sin shell dentro del worktree (hook PostToolUse) |
 | `autoDelegate.enabled` | `true` | Delegación automática en cada mensaje (`/mp-auto on\|off`) |
 | `statusline.mode` | `"compact"` | `full` / `compact` / `off` |
+| `card.enabled` / `card.placement` | `true` / `"side"` | Conductor header; `side` = panel al lado de la conversación, `below` = banda sobre el prompt (`/conductor lado\|abajo`) |
 | `providers.<codex\|antigravity>` | | `enabled`, `binaryPath`, `model`, `extraArgs`, `usePty`, `errorPatterns`, `timeoutMs`, `modelFlag`, `readModeArgs`, `writeModeArgs`, `versionArgs`, `authCheckArgs`, `skipGitRepoCheck` (codex), `outputFormat` (agy: `text`/`json`) |
 
 `errorPatterns` acepta expresiones regulares (sin distinguir mayúsculas) por tipo de error: `AUTH`, `QUOTA`, `RATE_LIMIT`. Si defines un tipo, tus patrones **reemplazan** a los incluidos para ese tipo.
@@ -116,6 +117,8 @@ Comandos del plugin (también accesibles como `/multi-provider:<comando>`):
 /mp-statusline full|compact|off
 /mp-auto on|off|status
 /mp-doctor [--no-live]
+/conductor lado|abajo
+/clean-terminal
 ```
 
 ### Diagnóstico (`/mp-doctor`)
@@ -186,9 +189,30 @@ Claude verifica → ACCEPT: delegation_apply (git apply --3way) + commit propio 
 
 Todo esto es un respaldo frente a bugs conocidos en los que el setting no se respeta.
 
-## Conductor header (banda encima del prompt)
+## Conductor header (al lado o debajo)
 
-Además de la status line, el plugin dibuja un **header propio encima del prompt**, siempre expandido: la sesión, la orquesta de proveedores y el spec SDD activo de un vistazo. Usa los mods de Claude Code (probado con **v2.1.302**). En versiones que no los soportan, el header simplemente no aparece y el resto del plugin funciona igual.
+Además de la status line, el plugin dibuja un **header propio**, siempre expandido: la sesión, la orquesta de proveedores y el spec SDD activo de un vistazo. Usa los mods de Claude Code (probado con **v2.1.302**). En versiones que no los soportan, el header simplemente no aparece y el resto del plugin funciona igual.
+
+**Dónde se dibuja** (`/conductor lado|abajo`, o `card.placement` en `multiprovider.json`):
+
+- **`lado`** (por defecto): un panel **a la derecha de la conversación**, fijo mientras la conversación hace scroll. Requiere el renderizado a pantalla completa (`/tui fullscreen`) y una terminal ancha: un panel que abre el plugin solo aparece desde 144 columnas (110 si ya lo abriste tú alguna vez). Ejecutar `/conductor` lo abre a cualquier ancho. Si la terminal es angosta o cierras el panel (`Esc`), el header vuelve a la banda sobre el prompt.
+- **`abajo`**: la banda justo encima del prompt, a todo el ancho.
+
+Claude Code no permite que un plugin dibuje en la parte superior de la pantalla, así que esas son las dos posiciones posibles. La elección de `/conductor` se recuerda entre sesiones y tiene prioridad sobre `card.placement`.
+
+```text
+┌ conversación (hace scroll) ──────────────────┐┌ ◆ conductor  claude-conductor · main ┐
+│ ● Avance de sii-paso-produccion: 11/22…      ││ sesión 4 delegaciones · 13.5k tok    │
+│ …                                            ││ Opus 5.5 ctx ━━────────── 19% $1.20  │
+│                                              ││ ╭ codex ───────────── ● afinado ╮    │
+│                                              ││ ╭ agy ─────────── ◐ silencio 2m ╮    │
+│                                              ││ ╭ sii-paso-produccion  T12 en curso ╮│
+├──────────────────────────────────────────────┤│ 1 /providers-status  …               │
+│ > _                                          ││ codex → agy → claude                 │
+└──────────────────────────────────────────────┘└──────────────────────────────────────┘
+```
+
+En la banda (`abajo`) el header ocupa todo el ancho:
 
 ```text
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -207,13 +231,13 @@ Además de la status line, el plugin dibuja un **header propio encima del prompt
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-- **Siempre expandido**: no hay versión compacta. La conversación avanza y hace scroll por encima; el header se queda fijo junto al prompt.
-- **Sesión**: repo y rama, delegaciones y tokens de la sesión, modelo, uso de contexto (`ctx`) y costo, leídos de `$.session` cada 5 s.
+- **Siempre expandido**: no hay versión compacta. En el panel lateral, las tarjetas se apilan en columna.
+- **Sesión**: repo y rama, delegaciones y tokens de la sesión, modelo (`Sonnet 5.5`, no el id), uso de contexto (`ctx`) y costo, leídos de `$.session` cada 5 s.
 - **Proveedores**: una tarjeta por proveedor con estado, versión, auth, barras de llamadas, tokens y tiempo del día, y circuito con cuenta atrás. Durante una delegación, la tarjeta del proveedor muestra `⠹ tocando · write · 00:42` con borde latón y la tarea debajo.
 - **Spec activo** (si el proyecto usa [spec-driven](https://github.com/Lucke514/spec-driven)): lee `specs/*/tasks.md` (o el `## Tasks` de un `spec.md` Small) y muestra la feature con una tarea reclamada o, si no hay, la primera `approved` con tareas abiertas: tarea en curso o siguiente, avance `hechas/total` y owner.
 - **Atajos**: `1` `/providers-status`, `2` `/providers-config`, `3` limpiar worktrees, `4` `/mp-doctor`, `5` clean-terminal (los dígitos funcionan escribiéndolos solos en el prompt vacío).
 - **Estados**: *en curso* (borde latón), *primer uso* (sugiere `/delegate auto` y `/mp-doctor`), *degradado* (rojo solo en lo que bloquea, con su arreglo) y *solo Claude* (proveedores tachados en la cadena).
-- Desactivarlo: `"card": { "enabled": false }` en `multiprovider.json`.
+- Desactivarlo: `"card": { "enabled": false }` en `multiprovider.json`. Posición por defecto: `"card": { "placement": "side" | "below" }`.
 
 ### `/clean-terminal`: limpiar la pantalla sin perder el contexto
 

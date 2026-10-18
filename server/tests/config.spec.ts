@@ -16,6 +16,7 @@ describe("config validation", () => {
     expect(c.retry.retryOn).toEqual(["RATE_LIMIT", "TIMEOUT"]);
     expect(c.providers.codex).toMatchObject({ enabled: true, extraArgs: [], errorPatterns: {} });
     expect(c.statusline.mode).toBe("compact");
+    expect(c.card.placement).toBe("side");
   });
 
   it("rejects unknown providers in the chain", () => {

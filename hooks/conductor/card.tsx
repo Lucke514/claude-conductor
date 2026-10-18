@@ -1,4 +1,5 @@
-// Conductor header: a band above the prompt, always expanded, showing the
+// Conductor header, always expanded: a pane beside the conversation (wide
+// fullscreen terminal) or the band above the prompt (/conductor lado|abajo), showing the
 // session (model, context, cost), the multi-provider orchestra (provider health,
 // circuit breakers, recent delegations, live progress) and the active SDD spec.
 // Reads ~/.claude/multi-provider/state.json and specs/*/tasks.md; never runs the CLIs.
@@ -6,9 +7,9 @@
 // /clean-terminal hides the transcript rows drawn so far without touching the
 // conversation: Claude keeps the whole context, only the drawing is emptied.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren, ToolCallResult } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren, RenderElement, RenderInput, ToolCallResult } from 'claude-code'
 
-import type { Cleaned, Running, SessionMeta, SessionTally, SpecProgress, StateFile } from '../../types'
+import type { Cleaned, Placement, Running, SessionMeta, SessionTally, SpecProgress, StateFile } from '../../types'
 import {
   bar,
   buildCard,
@@ -20,6 +21,7 @@ import {
   PALETTE,
   parseVerdict,
   pickActiveSpec,
+  prettyModel,
   specProgress,
   type CardView,
   type ProviderView,
@@ -35,6 +37,13 @@ const session = atom({ plugin: 'multi-provider', key: 'session' } as const, { ca
 const meta = atom({ plugin: 'multi-provider', key: 'meta' } as const, {})
 const spec = atom({ plugin: 'multi-provider', key: 'spec' } as const, null)
 const cleaned = atom({ plugin: 'multi-provider', key: 'cleaned' } as const, null)
+const placement = atom({ plugin: 'multi-provider', key: 'placement' } as const, 'side')
+const paneShown = atom({ plugin: 'multi-provider', key: 'paneShown' } as const, false)
+
+/** The side pane's id: what $.ui.open names and its ui.render requestId. */
+const PANE = 'conductor'
+/** Columns the side pane asks for beside the transcript. */
+const PANE_COLUMNS = 48
 
 const CHAIN_COLOR = '#6CC6D8'
 const MUTED = '#AAB1BC'
@@ -67,22 +76,29 @@ async function loadState($: EngineInterface): Promise<void> {
   if (JSON.stringify(prev) !== JSON.stringify(next ?? null)) await update($, snap, () => next ?? null)
 }
 
-/** card.enabled from ~/.claude/multiprovider.json (wins) or the project's .claude/multiprovider.json. */
-async function loadEnabled($: EngineInterface): Promise<void> {
+/**
+ * card.enabled and card.placement from ~/.claude/multiprovider.json (wins) or the
+ * project's .claude/multiprovider.json. A placement chosen with /conductor wins over both.
+ */
+async function loadCardConfig($: EngineInterface): Promise<void> {
   const home = await homeDir($)
   const userPath = (await $.env.get('MP_USER_CONFIG')) ?? (home ? `${home}/.claude/multiprovider.json` : undefined)
-  const pick = (c: unknown) => (c as { card?: { enabled?: unknown } } | undefined)?.card?.enabled
-  const user = userPath ? pick(await readJson($, userPath)) : undefined
-  const project = pick(await readJson($, '.claude/multiprovider.json'))
-  const value = typeof user === 'boolean' ? user : typeof project === 'boolean' ? project : true
-  if ((await read($, enabled)) !== value) await update($, enabled, () => value)
+  const card = (c: unknown) => (c as { card?: { enabled?: unknown; placement?: unknown } } | undefined)?.card
+  const user = userPath ? card(await readJson($, userPath)) : undefined
+  const project = card(await readJson($, '.claude/multiprovider.json'))
+  const on = typeof user?.enabled === 'boolean' ? user.enabled : typeof project?.enabled === 'boolean' ? project.enabled : true
+  if ((await read($, enabled)) !== on) await update($, enabled, () => on)
+  const isPlacement = (v: unknown): v is Placement => v === 'side' || v === 'below'
+  const chosen = await $.store.get('placement')
+  const where: Placement = isPlacement(chosen) ? chosen : isPlacement(user?.placement) ? user.placement : isPlacement(project?.placement) ? project.placement : 'side'
+  if ((await read($, placement)) !== where) await update($, placement, () => where)
 }
 
 /** Model, context use and cost as the status line has them; repo and branch from the working copy. */
 async function loadMeta($: EngineInterface): Promise<void> {
   const next: SessionMeta = {}
   try {
-    next.model = await $.session.model()
+    next.model = prettyModel(await $.session.model())
   } catch {
     /* not reported on this surface */
   }
@@ -199,16 +215,215 @@ async function restoreTerminal($: EngineInterface): Promise<void> {
   $.ui.invalidate('ui.render')
 }
 
+/** Whether the side pane is on screen now (placed, and the pane shown among its tabs). */
+async function syncPane($: EngineInterface): Promise<void> {
+  const pane = (await $.ui.panes()).find(p => p.id === PANE)
+  const shown = !!pane && pane.isPlaced && pane.isShown
+  if ((await read($, paneShown)) !== shown) await update($, paneShown, () => shown)
+}
+
+async function openPane($: EngineInterface): Promise<void> {
+  await $.ui.open({ id: PANE, title: 'conductor', columns: PANE_COLUMNS })
+  await syncPane($)
+}
+
+/** Everything the header reads, then the side pane when that is the placement. */
+async function loadAll($: EngineInterface): Promise<void> {
+  await loadCardConfig($)
+  await loadState($)
+  await loadMeta($)
+  await loadSpec($)
+  // Opened by the plugin itself, the pane shows only on a wide terminal; until
+  // then (or when the person closes it) the band above the prompt draws instead.
+  if ((await read($, enabled)) && (await read($, placement)) === 'side') await openPane($).catch(() => undefined)
+}
+
+async function setPlacement($: EngineInterface, where: Placement): Promise<void> {
+  await $.store.set('placement', where)
+  await update($, placement, () => where)
+  if (where === 'side') await openPane($)
+  else {
+    await $.ui.close({ id: PANE })
+    await syncPane($)
+  }
+}
+
+/**
+ * The header's tree for the band or the side pane; `undefined` before state.json
+ * exists. Narrow sites (the pane, a slim band) stack what a wide band lays in rows.
+ */
+async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pane'>): Promise<RenderElement | undefined> {
+  const state = await read($, snap)
+  if (!state) return undefined
+  const view = buildCard({
+    state,
+    now: await $.clock.now(),
+    running: await read($, running),
+    verdicts: await read($, verdicts),
+    session: await read($, session),
+    tick: await read($, tick),
+  })
+  const m: SessionMeta = await read($, meta)
+  const active: SpecProgress | null = await read($, spec)
+  const wasCleaned: Cleaned | null = await read($, cleaned)
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const wide = e.props.bodyColumns >= 100
+  const inPane = e.component === 'Pane'
+  // Rows: header 1 + cards 7 + recent 4 + notice 1 + footer 1, border 2. A pane scrolls.
+  const roomy = inPane || e.props.maxRows === undefined || e.props.maxRows >= 18
+  const run = (command: string) => () => void $.command.run({ command })
+
+  const where = [m.repo, m.branch].filter(Boolean).join(' · ')
+  const header = (
+    <Box key="header" flexDirection={wide ? 'row' : 'column'} justifyContent="space-between">
+      <Text>
+        <Text color={PALETTE.brass} bold>◆ conductor</Text>
+        <Text color={PALETTE.dim}>{wide ? `  ${where ? `${where}  ·  ` : ''}${view.summary}` : `  ${where}`}</Text>
+      </Text>
+      {wide ? '' : <Text color={PALETTE.dim}>{view.summary}</Text>}
+      <Text>
+        {m.model ? <Text color={MUTED}>{`${m.model}  `}</Text> : ''}
+        {m.ctxPercent !== undefined ? (
+          <Text>
+            <Text color={PALETTE.dim}>{'ctx '}</Text>
+            <Text color={CHAIN_COLOR}>{ctxBar(m.ctxPercent)}</Text>
+            <Text color={MUTED}>{` ${m.ctxPercent}%  `}</Text>
+          </Text>
+        ) : ''}
+        <Text color={PALETTE.dim}>{fmtCost(m.costUsd)}</Text>
+      </Text>
+    </Box>
+  )
+
+  const runningOn = view.running?.provider
+  const providerCard = (p: ProviderView) => {
+    const isRunning = runningOn === p.short && view.running
+    return (
+      <Box
+        key={`card-${p.name}`}
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={isRunning ? PALETTE.brass : p.tone === 'ok' ? '#1F4A33' : p.tone === 'error' ? '#6A2E2E' : p.tone === 'dim' ? '#262C35' : '#5A4A1F'}
+        paddingX={1}
+        flexGrow={1}
+      >
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text color={STRONG} bold>{p.short}</Text>
+          {isRunning && view.running ? (
+            <Text color={PALETTE.brass}>{`${view.running.spinner} tocando · ${view.running.mode} · ${view.running.elapsed}`}</Text>
+          ) : (
+            <Text color={color(p.tone)}>{p.badge}</Text>
+          )}
+        </Box>
+        <Text color={PALETTE.dim}>{[p.version, p.auth ? `auth ${p.auth === 'ok' ? 'ok' : p.auth === 'missing' ? 'ausente' : 'desconocida'}` : ''].filter(Boolean).join(' · ') || ' '}</Text>
+        <Text>{'hoy     '}<Text color={color(p.tone)}>{bar(p.callsToday, view.maxCalls)}</Text><Text color={MUTED}>{` ${p.callsToday} llamadas`}</Text></Text>
+        <Text>{'tokens  '}<Text color={p.tokensToday ? color(p.tone) : '#3A414C'}>{bar(p.tokensToday, view.maxTokens)}</Text><Text color={MUTED}>{p.tokensToday ? ` ${fmtTokens(p.tokensToday)}` : ' no reportados'}</Text></Text>
+        <Text>{'tiempo  '}<Text color={color(p.tone)}>{bar(p.durationMsToday, view.maxDuration)}</Text><Text color={MUTED}>{` ${fmtDuration(p.durationMsToday)}`}</Text></Text>
+        <Text color={p.tone === 'error' ? PALETTE.error : p.kind === 'cooldown' || p.kind === 'half_open' ? PALETTE.warn : PALETTE.dim}>{p.fix ?? p.breakerLine}</Text>
+      </Box>
+    )
+  }
+
+  const specCard = active ? (
+    <Box key="card-spec" flexDirection="column" borderStyle="round" borderColor="#262C35" paddingX={1} flexGrow={1}>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text color={STRONG} bold>{active.slug}</Text>
+        <Text color={active.current?.state === 'en curso' ? PALETTE.brass : MUTED}>{active.current ? `${active.current.id} ${active.current.state}` : 'sin tareas abiertas'}</Text>
+      </Box>
+      <Text color={PALETTE.dim}>{`spec-driven · tasks ${active.status}`}</Text>
+      <Text>{'tasks   '}<Text color={PALETTE.ok}>{bar(active.done, Math.max(1, active.total))}</Text><Text color={MUTED}>{` ${active.done}/${active.total}`}</Text></Text>
+      <Text color={MUTED}>{active.current ? active.current.title.slice(0, 34) : ' '}</Text>
+      <Text color={PALETTE.dim}>{active.current && active.current.owner !== '—' ? `owner ${active.current.owner}`.slice(0, 34) : 'sin owner'}</Text>
+      <Text color={PALETTE.dim}>{active.current ? `/sdd-delegate ${active.slug} next` : ' '}</Text>
+    </Box>
+  ) : null
+
+  const cards = (
+    <Box key="cards" flexDirection={wide ? 'row' : 'column'} gap={2}>
+      {view.providers.map(providerCard)}
+      {specCard ?? ''}
+    </Box>
+  )
+
+  // One line of context under the cards: what's running, what to try, or why only Claude plays.
+  const hint =
+    view.kind === 'running' && view.running ? (
+      <Text key="hint" color={PALETTE.dim}>{`  “${view.running.task}”`}</Text>
+    ) : view.kind === 'first_use' ? (
+      <Text key="hint">
+        <Text color={MUTED}>La orquesta está afinada. Prueba </Text>
+        <Text color={PALETTE.brass}>/delegate auto</Text>
+        <Text color={MUTED}> o </Text>
+        <Text color={PALETTE.brass}>/mp-doctor</Text>
+      </Text>
+    ) : view.kind === 'claude_only' ? (
+      <Text key="hint" color={MUTED}>Claude toca solo: cada /delegate vuelve como fallback_to_claude.</Text>
+    ) : null
+
+  const recent = roomy ? (
+    <Box key="recent" flexDirection="column">
+      <Text color={PALETTE.dim}>últimas delegaciones</Text>
+      {view.recent.length === 0 ? <Text color={PALETTE.dim}>  —</Text> : ''}
+      {view.recent.map(r => (
+        <Text key={`r-${r.id}`}>
+          <Text color={PALETTE.dim}>{pad(r.time, 7)}</Text>
+          <Text>{pad(r.who, 12)}</Text>
+          <Text color={r.mode === 'write' ? PALETTE.brass : PALETTE.dim}>{pad(r.mode, 7)}</Text>
+          <Text>{pad(r.task, wide ? 46 : 24)}</Text>
+          <Text color={color(r.tone)}>{` ${r.outcome}`}</Text>
+        </Text>
+      ))}
+    </Box>
+  ) : null
+
+  const notice = wasCleaned ? (
+    <Box key="cleaned" flexDirection={wide ? 'row' : 'column'} justifyContent="space-between">
+      <Text color={PALETTE.dim}>{`─ terminal limpia · contexto intacto${m.ctxPercent !== undefined ? ` (ctx ${m.ctxPercent}%)` : ''} · ${wasCleaned.rows} filas ocultas`}</Text>
+      <Button key="restore" plain hotkey="h" label="ver historial" onPress={() => void restoreTerminal($)} />
+    </Box>
+  ) : null
+
+  const footer = (
+    <Box key="footer" flexDirection={wide ? 'row' : 'column'} justifyContent="space-between">
+      <Box flexDirection={wide ? 'row' : 'column'} columnGap={3}>
+        <Button key="status" plain hotkey="1" label="/providers-status" onPress={run('multi-provider:providers-status')} />
+        <Button key="config" plain hotkey="2" label="/providers-config" onPress={run('multi-provider:providers-config')} />
+        <Button
+          key="cleanup"
+          plain
+          hotkey="3"
+          label="limpiar worktrees"
+          onPress={() => void $.prompt.submit({ text: 'Usa la herramienta delegation_cleanup de multi-provider para limpiar los worktrees mp/* huérfanos.' })}
+        />
+        <Button key="doctor" plain hotkey="4" label="/mp-doctor" onPress={run('multi-provider:mp-doctor')} />
+        <Button key="clean" plain hotkey="5" label="clean-terminal" onPress={() => void cleanTerminal($)} />
+      </Box>
+      <Text color={PALETTE.dim}>
+        {view.chain.map((c, i) => (
+          <Text key={`c${i}`}>
+            {i > 0 ? <Text color={PALETTE.dim}>{' → '}</Text> : ''}
+            <Text color={c.name === 'claude' ? PALETTE.text : CHAIN_COLOR} strikethrough={c.struck}>{c.name}</Text>
+          </Text>
+        ))}
+      </Text>
+    </Box>
+  )
+
+  const body: RenderChildren = [header, cards, hint ?? '', recent ?? '', notice ?? '', footer]
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={view.border} paddingX={1}>
+      {body}
+    </Box>
+  )
+}
+
 export const register: Register = on => {
   let firstLoadDone = false
 
   on('session.start', async ($, e, next) => {
     const stored = await $.store.get('verdicts')
     if (stored && typeof stored === 'object') await update($, verdicts, () => stored as Record<string, string>)
-    await loadEnabled($)
-    await loadState($)
-    await loadMeta($)
-    await loadSpec($)
+    await loadAll($)
     firstLoadDone = true
 
     // One-second heartbeat. It only redraws while something moves on screen
@@ -222,13 +437,24 @@ export const register: Register = on => {
         await loadMeta($)
       }
       if (seconds % 15 === 0) await loadSpec($)
-      if (seconds % 60 === 0) await loadEnabled($)
+      if (seconds % 60 === 0) await loadCardConfig($)
+      await syncPane($)
       const s = await read($, snap)
       const now = await $.clock.now()
       const counting = Object.values(s?.providers ?? {}).some(p => (p?.breaker?.cooldownUntil ?? 0) > now)
       if ((await read($, running)) || counting) await update($, tick, t => t + 1)
     })
 
+    try {
+      await $.command.register({
+        name: 'conductor',
+        description: 'Muestra el header del conductor al lado de la conversación o debajo, sobre el prompt',
+        argumentHint: 'lado|abajo',
+        immediate: true,
+      })
+    } catch {
+      /* name taken: placement still follows card.placement */
+    }
     try {
       await $.command.register({
         name: 'clean-terminal',
@@ -239,6 +465,24 @@ export const register: Register = on => {
       /* name taken: the rest of the band works without the command */
     }
     return next(e)
+  })
+
+  on('command.run', { command: 'conductor' }, async ($, e) => {
+    const arg = e.args.trim().toLowerCase()
+    if (arg === 'abajo' || arg === 'below') {
+      await setPlacement($, 'below')
+      return { text: 'Header del conductor: debajo, sobre el prompt.' }
+    }
+    if (arg && arg !== 'lado' && arg !== 'side') return { text: 'Uso: /conductor lado | /conductor abajo' }
+    await setPlacement($, 'side')
+    return { text: 'Header del conductor: al lado de la conversación (en una terminal angosta se dibuja sobre el prompt).' }
+  })
+
+  // The person closed the pane: the band takes over until /conductor opens it again.
+  on('ui.close', async ($, e, next) => {
+    const res = await next(e)
+    if (e.id === PANE) await update($, paneShown, () => false)
+    return res
   })
 
   on('command.run', { command: 'clean-terminal' }, async $ => {
@@ -291,177 +535,20 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || !(await read($, enabled))) return next(e)
-    const state = await read($, snap)
     if (!firstLoadDone) {
       // session.start normally loads it. Drawing is pure, so any other first
       // load happens on a timer; its state write draws the band again.
       firstLoadDone = true
-      $.clock.after(0, async () => {
-        await loadEnabled($)
-        await loadState($)
-        await loadMeta($)
-        await loadSpec($)
-      })
+      $.clock.after(0, () => loadAll($))
     }
-    if (!state) return next(e)
-    const view = buildCard({
-      state,
-      now: await $.clock.now(),
-      running: await read($, running),
-      verdicts: await read($, verdicts),
-      session: await read($, session),
-      tick: await read($, tick),
-    })
-    const m: SessionMeta = await read($, meta)
-    const active: SpecProgress | null = await read($, spec)
-    const wasCleaned: Cleaned | null = await read($, cleaned)
-    const { Box, Text, Button } = $.ui.resolve(e)
-    const wide = e.props.bodyColumns >= 100
-    // Rows: header 1 + cards 7 + recent 4 + notice 1 + footer 1, border 2.
-    const roomy = e.props.maxRows === undefined || e.props.maxRows >= 18
-    const run = (command: string) => () => void $.command.run({ command })
+    if ((await read($, placement)) === 'side' && (await read($, paneShown))) return next(e)
+    return (await drawHeader($, e)) ?? next(e)
+  })
 
-    const where = [m.repo, m.branch].filter(Boolean).join(' · ')
-    const header = (
-      <Box key="header" flexDirection="row" justifyContent="space-between">
-        <Text>
-          <Text color={PALETTE.brass} bold>◆ conductor</Text>
-          <Text color={PALETTE.dim}>{`  ${where ? `${where}  ·  ` : ''}${view.summary}`}</Text>
-        </Text>
-        <Text>
-          {m.model ? <Text color={MUTED}>{`${m.model}  `}</Text> : ''}
-          {m.ctxPercent !== undefined ? (
-            <Text>
-              <Text color={PALETTE.dim}>{'ctx '}</Text>
-              <Text color={CHAIN_COLOR}>{ctxBar(m.ctxPercent)}</Text>
-              <Text color={MUTED}>{` ${m.ctxPercent}%  `}</Text>
-            </Text>
-          ) : ''}
-          <Text color={PALETTE.dim}>{fmtCost(m.costUsd)}</Text>
-        </Text>
-      </Box>
-    )
-
-    const runningOn = view.running?.provider
-    const providerCard = (p: ProviderView) => {
-      const isRunning = runningOn === p.short && view.running
-      return (
-        <Box
-          key={`card-${p.name}`}
-          flexDirection="column"
-          borderStyle="round"
-          borderColor={isRunning ? PALETTE.brass : p.tone === 'ok' ? '#1F4A33' : p.tone === 'error' ? '#6A2E2E' : p.tone === 'dim' ? '#262C35' : '#5A4A1F'}
-          paddingX={1}
-          flexGrow={1}
-        >
-          <Box flexDirection="row" justifyContent="space-between">
-            <Text color={STRONG} bold>{p.short}</Text>
-            {isRunning && view.running ? (
-              <Text color={PALETTE.brass}>{`${view.running.spinner} tocando · ${view.running.mode} · ${view.running.elapsed}`}</Text>
-            ) : (
-              <Text color={color(p.tone)}>{p.badge}</Text>
-            )}
-          </Box>
-          <Text color={PALETTE.dim}>{[p.version, p.auth ? `auth ${p.auth === 'ok' ? 'ok' : p.auth === 'missing' ? 'ausente' : 'desconocida'}` : ''].filter(Boolean).join(' · ') || ' '}</Text>
-          <Text>{'hoy     '}<Text color={color(p.tone)}>{bar(p.callsToday, view.maxCalls)}</Text><Text color={MUTED}>{` ${p.callsToday} llamadas`}</Text></Text>
-          <Text>{'tokens  '}<Text color={p.tokensToday ? color(p.tone) : '#3A414C'}>{bar(p.tokensToday, view.maxTokens)}</Text><Text color={MUTED}>{p.tokensToday ? ` ${fmtTokens(p.tokensToday)}` : ' no reportados'}</Text></Text>
-          <Text>{'tiempo  '}<Text color={color(p.tone)}>{bar(p.durationMsToday, view.maxDuration)}</Text><Text color={MUTED}>{` ${fmtDuration(p.durationMsToday)}`}</Text></Text>
-          <Text color={p.tone === 'error' ? PALETTE.error : p.kind === 'cooldown' || p.kind === 'half_open' ? PALETTE.warn : PALETTE.dim}>{p.fix ?? p.breakerLine}</Text>
-        </Box>
-      )
-    }
-
-    const specCard = active ? (
-      <Box key="card-spec" flexDirection="column" borderStyle="round" borderColor="#262C35" paddingX={1} flexGrow={1}>
-        <Box flexDirection="row" justifyContent="space-between">
-          <Text color={STRONG} bold>{active.slug}</Text>
-          <Text color={active.current?.state === 'en curso' ? PALETTE.brass : MUTED}>{active.current ? `${active.current.id} ${active.current.state}` : 'sin tareas abiertas'}</Text>
-        </Box>
-        <Text color={PALETTE.dim}>{`spec-driven · tasks ${active.status}`}</Text>
-        <Text>{'tasks   '}<Text color={PALETTE.ok}>{bar(active.done, Math.max(1, active.total))}</Text><Text color={MUTED}>{` ${active.done}/${active.total}`}</Text></Text>
-        <Text color={MUTED}>{active.current ? active.current.title.slice(0, 34) : ' '}</Text>
-        <Text color={PALETTE.dim}>{active.current && active.current.owner !== '—' ? `owner ${active.current.owner}`.slice(0, 34) : 'sin owner'}</Text>
-        <Text color={PALETTE.dim}>{active.current ? `/sdd-delegate ${active.slug} next` : ' '}</Text>
-      </Box>
-    ) : null
-
-    const cards = (
-      <Box key="cards" flexDirection={wide ? 'row' : 'column'} gap={2}>
-        {view.providers.map(providerCard)}
-        {specCard ?? ''}
-      </Box>
-    )
-
-    // One line of context under the cards: what's running, what to try, or why only Claude plays.
-    const hint =
-      view.kind === 'running' && view.running ? (
-        <Text key="hint" color={PALETTE.dim}>{`  “${view.running.task}”`}</Text>
-      ) : view.kind === 'first_use' ? (
-        <Text key="hint">
-          <Text color={MUTED}>La orquesta está afinada. Prueba </Text>
-          <Text color={PALETTE.brass}>/delegate auto</Text>
-          <Text color={MUTED}> o </Text>
-          <Text color={PALETTE.brass}>/mp-doctor</Text>
-        </Text>
-      ) : view.kind === 'claude_only' ? (
-        <Text key="hint" color={MUTED}>Claude toca solo: cada /delegate vuelve como fallback_to_claude.</Text>
-      ) : null
-
-    const recent = roomy ? (
-      <Box key="recent" flexDirection="column">
-        <Text color={PALETTE.dim}>últimas delegaciones</Text>
-        {view.recent.length === 0 ? <Text color={PALETTE.dim}>  —</Text> : ''}
-        {view.recent.map(r => (
-          <Text key={`r-${r.id}`}>
-            <Text color={PALETTE.dim}>{pad(r.time, 7)}</Text>
-            <Text>{pad(r.who, 12)}</Text>
-            <Text color={r.mode === 'write' ? PALETTE.brass : PALETTE.dim}>{pad(r.mode, 7)}</Text>
-            <Text>{pad(r.task, wide ? 46 : 24)}</Text>
-            <Text color={color(r.tone)}>{` ${r.outcome}`}</Text>
-          </Text>
-        ))}
-      </Box>
-    ) : null
-
-    const notice = wasCleaned ? (
-      <Box key="cleaned" flexDirection="row" justifyContent="space-between">
-        <Text color={PALETTE.dim}>{`─ terminal limpia · contexto intacto${m.ctxPercent !== undefined ? ` (ctx ${m.ctxPercent}%)` : ''} · ${wasCleaned.rows} filas ocultas`}</Text>
-        <Button key="restore" plain hotkey="h" label="ver historial" onPress={() => void restoreTerminal($)} />
-      </Box>
-    ) : null
-
-    const footer = (
-      <Box key="footer" flexDirection="row" justifyContent="space-between">
-        <Box flexDirection="row" gap={3}>
-          <Button key="status" plain hotkey="1" label="/providers-status" onPress={run('multi-provider:providers-status')} />
-          <Button key="config" plain hotkey="2" label="/providers-config" onPress={run('multi-provider:providers-config')} />
-          <Button
-            key="cleanup"
-            plain
-            hotkey="3"
-            label="limpiar worktrees"
-            onPress={() => void $.prompt.submit({ text: 'Usa la herramienta delegation_cleanup de multi-provider para limpiar los worktrees mp/* huérfanos.' })}
-          />
-          <Button key="doctor" plain hotkey="4" label="/mp-doctor" onPress={run('multi-provider:mp-doctor')} />
-          <Button key="clean" plain hotkey="5" label="clean-terminal" onPress={() => void cleanTerminal($)} />
-        </Box>
-        <Text color={PALETTE.dim}>
-          {view.chain.map((c, i) => (
-            <Text key={`c${i}`}>
-              {i > 0 ? <Text color={PALETTE.dim}>{' → '}</Text> : ''}
-              <Text color={c.name === 'claude' ? PALETTE.text : CHAIN_COLOR} strikethrough={c.struck}>{c.name}</Text>
-            </Text>
-          ))}
-        </Text>
-      </Box>
-    )
-
-    const body: RenderChildren = [header, cards, hint ?? '', recent ?? '', notice ?? '', footer]
-    return (
-      <Box flexDirection="column" borderStyle="round" borderColor={view.border} paddingX={1}>
-        {body}
-      </Box>
-    )
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (e.requestId !== PANE) return next(e)
+    const { Text } = $.ui.resolve(e)
+    return (await drawHeader($, e)) ?? <Text color={PALETTE.dim}>◆ conductor · esperando el primer health check</Text>
   })
 }
 

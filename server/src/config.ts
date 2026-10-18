@@ -95,8 +95,10 @@ export const ConfigSchema = z.object({
     .prefault({}),
   card: z
     .object({
-      /** Conductor card (band above the prompt, Claude Code with plugin UI modules). */
+      /** Conductor header (Claude Code mods). */
       enabled: z.boolean().default(true),
+      /** "side": a pane beside the conversation (wide fullscreen terminal); "below": the band above the prompt. */
+      placement: z.enum(["side", "below"]).default("side"),
     })
     .prefault({}),
   providers: z

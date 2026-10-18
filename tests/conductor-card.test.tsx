@@ -32,7 +32,7 @@ const STATE = {
   ],
 }
 
-function world(on: On, files: Record<string, unknown>) {
+function world(on: On, files: Record<string, unknown>, pane: 'shown' | 'waiting' = 'waiting') {
   const clock = mock.clock(on, { now: NOW })
   mock.store(on)
   mock.env(on, { HOME: '/home/u' })
@@ -47,7 +47,19 @@ function world(on: On, files: Record<string, unknown>) {
     const entries = (lookup(`${e.path}/`) as string[] | undefined) ?? []
     return { value: entries.map(name => ({ name, kind: 'dir', size: 0, isLink: false })) }
   })
-  on('session.model', async () => ({ value: 'Opus 5.5' }))
+  on('session.model', async () => ({ value: 'claude-opus-5-5[1m]' }))
+  // The side pane: placed on a wide terminal ('shown'), or waiting on a narrow one,
+  // where the band above the prompt draws instead.
+  let open = false
+  on('ui.open', async () => {
+    open = true
+    return { value: pane === 'shown' ? { isPlaced: true } : { isPlaced: false, reason: 'narrow' } }
+  })
+  on('ui.close', async () => {
+    open = false
+    return { value: undefined }
+  })
+  on('ui.panes', async () => ({ value: open ? [{ id: 'conductor', title: 'conductor', isShown: pane === 'shown', isFocused: false, isPlaced: pane === 'shown' }] : [] }))
   on('session.usage', async () => ({ value: { startedAt: 0, context: { tokens: 84000, window: 200000, percent: 42 }, rateLimits: [], cost: { usd: 0.5 } } }))
   on('session.repo', async () => ({ value: { root: '/repo', remote: null, internal: false, name: 'claude-conductor' } }))
   // What the engine draws when no plugin draws the band.
@@ -86,6 +98,13 @@ const FILES = {
   'specs/': ['sdd-guardrails'],
   'specs/sdd-guardrails/tasks.md': TASKS,
 }
+
+const PANE = {
+  plugin: 'multi-provider',
+  component: 'Pane',
+  requestId: 'conductor',
+  props: { title: 'conductor', isFocused: false, bodyColumns: 46, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+} as never
 
 const MESSAGE = { plugin: 'multi-provider', component: 'UserMessage', props: { text: 'hola', origin: { kind: 'composer' }, isExpanded: false } } as never
 
@@ -170,4 +189,33 @@ describe('conductor header', () => {
     expect(await text(ui)).not.toContain('conductor')
     await ui.unmount()
   })
+
+  test('side placement: the header draws in the pane and the band steps aside', async ($, on) => {
+    const clock = world(on, FILES, 'shown')
+    const side = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await clock.advance(1500)
+    const t = await text(side)
+    expect(t).toContain('◆ conductor')
+    expect(t).toContain('Opus 5.5')
+    expect(t).toContain('T2 en curso')
+    expect(await band.find({ key: 'engine' })).toBeDefined()
+    expect(await text(band)).not.toContain('◆ conductor')
+    await Promise.all([side.unmount(), band.unmount()])
+  })
+
+  test('/conductor abajo moves the header to the band, /conductor lado back to the pane', async ($, on) => {
+    const clock = world(on, FILES, 'shown')
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await clock.advance(1500)
+    expect(await text(band)).not.toContain('◆ conductor')
+    await $.command.run({ command: 'conductor', args: 'abajo' })
+    await clock.advance(1500)
+    expect(await text(band)).toContain('◆ conductor')
+    await $.command.run({ command: 'conductor', args: 'lado' })
+    await clock.advance(1500)
+    expect(await text(band)).not.toContain('◆ conductor')
+    await band.unmount()
+  })
 })
+
