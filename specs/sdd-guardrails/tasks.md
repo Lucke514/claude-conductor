@@ -111,8 +111,8 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 
 ## T7 — Document the feature
 
-- [ ] Done
-- **Owner**: claude since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: — · **Implements**: all (documentation)
 - **Files**: `docs/sdd-guardrails.md`, `README.md`, `skills/multi-provider/SKILL.md`
 - **Do**:
@@ -121,7 +121,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
   - Actualizar en la skill las "Hard rules".
 - **Acceptance**: la documentación describe el comportamiento real y cada nombre de variable, violación y opción coincide con el código.
 - **Verify**: cotejar cada nombre con `server/src/worker-env.ts`, `server/src/worktree.ts`, `server/src/remote-check.ts` y `server/src/config.ts`; ejecutar SC2 en la máquina del usuario con `codex`
-- **Notes**: —
+- **Notes**: `docs/sdd-guardrails.md` (entorno del worker, violaciones nuevas, `sdd.drift`, hooks, límites, Operating); README (bloques "Sin push ni PRs del worker" y "`specs/` es tuyo" en Modelo de supervisión, fila `guardrails.checkRemotePush`, estructura) y "Hard rules" de `skills/multi-provider/SKILL.md`; cada nombre cotejado con `worker-env.ts`, `worktree.ts`, `remote-check.ts`, `delegate.ts`, `hooks.ts` y `config.ts`; commit `sdd-guardrails: T7 document the feature`. SC2 pendiente: necesita `codex` en la máquina del usuario. Clean-code: none · close calls: none
 
 ---
 
