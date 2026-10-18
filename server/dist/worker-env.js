@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import path from "node:path";
 import { mpHome } from "./paths.js";
 import { gitConfigEnv } from "./worktree.js";
@@ -49,7 +49,28 @@ export function pathKey(env) {
  * Overrides for `buildChildEnv`: `undefined` deletes a variable. With a worktree,
  * its hooks are forced too.
  */
-export function workerEnv(meta, env = process.env) {
+/** Whether `dir` is one of `roots` or inside one (compared as given and with symlinks resolved). */
+function under(dir, roots) {
+    const forms = (p) => {
+        const out = [path.resolve(p)];
+        try {
+            out.push(realpathSync.native(p));
+        }
+        catch {
+            // Missing directories only compare as given.
+        }
+        return out;
+    };
+    return forms(dir).some((d) => roots.flatMap(forms).some((r) => {
+        const rel = path.relative(r, d);
+        return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+    }));
+}
+/**
+ * `hidePaths`: the project and source repo roots. PATH entries under them (e.g.
+ * `<repo>/node_modules/.bin`) are dropped, so the worker's environment never names them.
+ */
+export function workerEnv(meta, env = process.env, hidePaths = []) {
     const key = pathKey(env);
     const out = {};
     for (const name of [...CREDENTIAL_ENV, ...PROJECT_PATH_ENV])
@@ -61,7 +82,7 @@ export function workerEnv(meta, env = process.env) {
         GIT_TERMINAL_PROMPT: "0",
         GIT_ALLOW_PROTOCOL: "file",
         GH_CONFIG_DIR: emptyGhConfigDir(),
-        [key]: [shimDir(), env[key]].filter(Boolean).join(path.delimiter),
+        [key]: [shimDir(), ...(env[key] ?? "").split(path.delimiter).filter((d) => d && !(hidePaths.length && under(d, hidePaths)))].join(path.delimiter),
     });
     return out;
 }

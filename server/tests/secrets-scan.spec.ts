@@ -1,4 +1,4 @@
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { scanSecrets } from "../src/secrets-scan.js";
@@ -21,12 +21,31 @@ describe("scanSecrets (nested-repos R6)", () => {
     expect(r).toEqual({ found: ["backend-monolith/.env", "web-app/config/.env.production"], truncated: false });
   });
 
-  it("does not follow symlinks", async () => {
+  it("G1: follows symlinked directories (the worker can open them), once each, without looping", async () => {
     const outside = tmpDir();
     touch(outside, ".env");
     const root = tmpDir();
-    symlinkSync(outside, path.join(root, "link"), process.platform === "win32" ? "junction" : "dir");
-    expect(await scanSecrets(root)).toEqual({ found: [], truncated: false });
+    const kind = process.platform === "win32" ? "junction" : "dir";
+    symlinkSync(outside, path.join(root, "config"), kind);
+    symlinkSync(root, path.join(root, "loop"), kind);
+    expect(await scanSecrets(root)).toEqual({ found: ["config/.env"], truncated: false });
+  });
+
+  it("G1: every .env* name counts (.envrc, .env-local, .env_prod)", async () => {
+    const root = tmpDir();
+    for (const n of [".envrc", ".env-local", ".env_prod"]) touch(root, n);
+    expect((await scanSecrets(root)).found.sort()).toEqual([".env-local", ".env_prod", ".envrc"]);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("G1: a directory it cannot read makes the scan truncated", async () => {
+    const root = tmpDir();
+    touch(root, "locked/x.txt");
+    chmodSync(path.join(root, "locked"), 0o000);
+    try {
+      expect((await scanSecrets(root)).truncated).toBe(true);
+    } finally {
+      chmodSync(path.join(root, "locked"), 0o755);
+    }
   });
 
   it("reports at most maxFound paths and truncates on the depth and entry limits", async () => {

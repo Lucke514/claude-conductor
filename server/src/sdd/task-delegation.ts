@@ -143,15 +143,14 @@ export async function sddTaskDelegate(
   const mode = args.mode ?? "write";
   const brief = buildTaskBrief(feature, task);
   const target: TaskRepo | undefined = task.repo ? await resolveTaskRepo(ctx.projectDir, feature.slug, task.repo) : undefined;
-  // Files of a task with **Repo** are relative to that repo; a `<Repo>/` prefix is accepted too.
-  const inRepo = (files: string[]) => (task.repo ? files.map((f) => (f.startsWith(`${task.repo}/`) ? f.slice(task.repo!.length + 1) : f)) : files);
   const r = await delegate(
     {
       provider,
       task: brief.task,
-      files: inRepo(brief.files),
-      scopeFiles: inRepo(task.files),
-      ...(target ? { repo: target.rel } : {}),
+      files: brief.files,
+      scopeFiles: task.files,
+      // Files of a task with **Repo** are relative to that repo; delegate also accepts a `<Repo>/` prefix.
+      ...(target ? { repo: target.rel, repoName: task.repo } : {}),
       extraOutput: brief.extraOutput,
       mode,
       fallback: true,

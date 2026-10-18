@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { delegate } from "../src/delegate.js";
@@ -501,6 +501,69 @@ describe("nested-repos: delegate with repo", () => {
     expect(ok.notes?.some((n) => n.includes("allowCwdWithSecrets") && n.includes("backend-monolith/.env"))).toBe(true);
     // A tree without .env files runs in cwd as before.
     expect((await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo(), cfg), adapters: spyAdapters().adapters })).status).toBe("success");
+  });
+
+  it("G2: an empty repo is rejected; a repo prefix is stripped once, from files and scopeFiles alike", async () => {
+    const { root, nested } = makeWorkspace();
+    await expect(delegate({ provider: "codex", task: "t", repo: "" }, ctx(root))).rejects.toMatchObject({ code: "REPO_INVALID" });
+    execFileSync(process.execPath, ["-e", `require("fs").mkdirSync(${JSON.stringify(path.join(nested, "backend-monolith"))})`]);
+    writeFileSync(path.join(nested, "backend-monolith", "inner.ts"), "export const inner = 1;\n");
+    git(nested, "add", "-A");
+    git(nested, "commit", "-qm", "inner dir named like the repo");
+    process.env.FAKE_MODE = "write";
+    const r = await delegate(
+      {
+        provider: "codex",
+        task: "t",
+        mode: "write",
+        repo: "backend-monolith",
+        files: ["backend-monolith/backend-monolith/inner.ts"],
+        scopeFiles: ["backend-monolith/added-by-worker.txt"],
+      },
+      ctx(root),
+    );
+    expect(r.files.find((f) => f.included)?.path).toBe("backend-monolith/inner.ts");
+    expect(r.violations).toBeUndefined();
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("G4: secrets reached through symlinks never get in: files, symlink entries; PATH loses the source paths", async () => {
+    const { root, nested } = makeWorkspace();
+    const kind = process.platform === "win32" ? "junction" : "dir";
+    // A tracked-looking file that points at the .env, and a directory holding an ignored secret.
+    symlinkSync(path.join(nested, ".env"), path.join(nested, "settings.txt"));
+    mkdirSync(path.join(nested, "config"));
+    writeFileSync(path.join(nested, "config", ".env.production"), "PROD=1\n");
+    symlinkSync(path.join(nested, "config"), path.join(nested, "conf-link"), kind);
+    mkdirSync(path.join(nested, "node_modules", "dotenv-example"), { recursive: true });
+    writeFileSync(path.join(nested, "node_modules", "dotenv-example", ".env"), "EXAMPLE=1\n");
+    const promptFile = path.join(tmpDir(), "prompt.txt");
+    const probeFile = path.join(tmpDir(), "probe.json");
+    const pathKeyName = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+    const pathBefore = process.env[pathKeyName];
+    Object.assign(process.env, {
+      FAKE_PROMPT_FILE: promptFile,
+      FAKE_MODE: "probe-secrets",
+      FAKE_PROBE_FILE: probeFile,
+      FAKE_FORBIDDEN_PATH: [root, realpathSync(root)].join(","),
+      [pathKeyName]: [path.join(nested, "node_modules", ".bin"), pathBefore].join(path.delimiter),
+    });
+    try {
+      const r = await delegate(
+        { provider: "codex", task: "t", repo: "backend-monolith", files: ["settings.txt"] },
+        ctx(root, { isolation: { symlinkByRepo: { "backend-monolith": ["config", "conf-link", "node_modules"] } } }),
+      );
+      expect(r.files[0]).toMatchObject({ included: false, reason: expect.stringMatching(/sensitive/) });
+      expect(readFileSync(promptFile, "utf8")).not.toContain("prod-secret");
+      expect(r.notes?.find((n) => n.startsWith("symlink skipped"))).toContain("config, conf-link");
+      const probe = JSON.parse(readFileSync(probeFile, "utf8"));
+      expect(probe.cwd).toContain("node_modules");
+      expect(probe.cwd).not.toContain("config");
+      expect(probe.leaks).toEqual([]);
+    } finally {
+      process.env[pathKeyName] = pathBefore;
+      for (const k of ["FAKE_PROMPT_FILE", "FAKE_PROBE_FILE", "FAKE_FORBIDDEN_PATH"]) delete process.env[k];
+    }
   });
 
   it("E1: a nested repo without commits names the repo", async () => {

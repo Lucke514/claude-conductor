@@ -196,3 +196,58 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
   - `claude plugin validate .` pasa.
 - **Verify**: `claude plugin validate .`
 - **Notes**: Hecha por Claude. `docs/nested-repos.md` (nuevo) cubre `repo`, `**Repo**` y su orden de resolución, los errores `REPO_*` y `UNSAFE_READ_MODE`, la config nueva, `requestedProvider`, el `Verify` con varios comandos, `/mp-doctor` y el riesgo residual de Q1. README: filas de `chainByMode`, `allowCwdWithSecrets`, `symlinkByRepo` y `readModeArgs` de agy, una sección "Workspaces con repos anidados", 3 filas de troubleshooting y 2 limitaciones (incluido el riesgo residual). El skill, `commands/delegate.md` (`--repo`), `commands/sdd-delegate.md` y los dos agentes (`repo`, `requestedProvider` en el veredicto) quedan actualizados. Gates: typecheck 0 errores, 308 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: `config/multiprovider.example.json` no muestra `chainByMode` ni `symlinkByRepo` (no estaba en Files); el README y la doc los documentan con ejemplo
+
+---
+
+## Gaps found in verification
+
+Hallazgos de una revisión independiente en modo read con codex (delegación 20261018065508-4a491e, ~120 s). Claude verificó cada uno contra el código; se resolvieron en un mismo commit, con tests.
+
+- [x] **G1** — `secrets-scan.ts`: no entraba en directorios enlazados (un `config -> /otro/dir` con `.env` pasaba como seguro), un `readdir` fallido contaba como vacío, y el patrón no cubría `.envrc`, `.env-local` ni `.env_prod`. Ahora sigue los symlinks de directorio (cada directorio real una vez, sin bucles), un directorio ilegible da `truncated`, y cuenta cualquier nombre `.env*`. El mismo patrón amplio pasa a `isSensitivePath`. Se reemplazó el test que fijaba "no sigue symlinks".
+- [x] **G2** — `delegate.ts`: con el worktree de la spec, `symlinkByRepo` se buscaba por `.claude/worktrees/<slug>/<Repo>` y no por `<Repo>` (R5). Además, el prefijo `<Repo>/` se quitaba dos veces (`task-delegation` y `delegate`), y `repo: ""` usaba la raíz. Ahora `delegate` recibe `repoName`, busca `symlinkByRepo[rel] ?? symlinkByRepo[repoName]`, quita un solo prefijo (de `files` y de `scopeFiles`), y rechaza `repo: ""` con `REPO_INVALID`.
+- [x] **G3** — `verify.ts`: una tarea **sin** `**Repo**` dejaba `manual` un gate cuyo `Where` nombraba un repo anidado, un cambio frente a hoy (R4/SC8). Ahora la regla de R5 solo aplica a tareas con `**Repo**`.
+- [x] **G4** — R3 por symlinks, ligado al requisito no negociable del usuario:
+  - un `files` que es un symlink a `.env` (`settings.txt -> .env`) entraba en el prompt. Ya pasaba antes de esta rama. Ahora `prompt-builder` resuelve la ruta real, rechaza destinos fuera del proyecto y vuelve a aplicar `isSensitivePath`;
+  - una entrada de `symlink`/`symlinkByRepo` con un nombre inocente que apunta a un secreto, o un directorio con `.env*` dentro, se enlazaba. Ahora se omite y se anota (`node_modules` no se recorre: son paquetes);
+  - el `PATH` heredado podía nombrar el repo de origen (`<repo>/node_modules/.bin`). Ahora `workerEnv` quita las entradas que están bajo el proyecto o el repo de origen.
+- [x] **G5** — `repo.ts`: `inside()` rechazaba nombres que solo empiezan por `..` (`..backend`). Ahora compara `..` como segmento.
+- [>] **G6** — Deferred: `managedWorktrees` lista todos los `mp/*` del git dir compartido. Si el proyecto contiene un worktree enlazado de un repo externo, `delegation_cleanup` también limpia los `mp/*` creados desde ese repo. Ya pasaba antes de esta rama con un proyecto que fuera un worktree enlazado, y el escenario es poco realista. Queda como deuda.
+- [~] **G7** — Waived: el texto del brief de la tarea muestra los `Files` con el prefijo `<Repo>/` aunque los adjuntos van sin él. Es cosmético; el worker recibe las dos formas y las rutas del worktree son relativas al repo.
+
+---
+
+## Verification reports
+
+### Verification report — nested-repos — 2026-10-18 — pass 1
+
+Change set: `main@b8fc123...HEAD` (`feature/nested-repos`)
+Converged: yes — G6 diferido (pre-existente, poco realista) y G7 descartado (cosmético)
+
+| Req | Verdict | Evidence (case · assertion · clause) |
+|---|---|---|
+| R1 | met | `repo.spec.ts` (5 casos: `..`, absoluta, symlink que sale, inexistente, subdirectorio con la raíz sugerida, `..backend` válido); `delegate.spec.ts::"R1/SC3…"` (el adapter espía no registra llamadas; `git worktree list` sin cambios) y `"G2…"` (`repo: ""`) |
+| R2 | met | `delegate.spec.ts::"R2: the worktree comes from the nested repo…"` (`meta.repoRoot`, `files` con y sin prefijo, rama `mp/*` en el repo anidado, `apply` en él) y `"R2: symlinkByRepo…"` |
+| R3 | met | `delegate.spec.ts::"R3/SC1…"` (`package.json` sí, `.env` `ENOENT`, sin la ruta del workspace en el env ni en el prompt), `"R3: a symlink entry naming secrets…"` (hooks fuera del `.git` de origen), `"R3: … still cannot commit"`, `"G4…"` (symlink en `files`, directorios con `.env`, `PATH`). **Prueba real** con codex: worker en `backend-monolith`, `ls -la` sin `.env`, la palabra canario no aparece. Riesgo residual documentado (Q1) |
+| R4 | met | `sdd-task-delegation.spec.ts::"SC2…"`, `"R4: without a spec worktree…"`, `"R4: an unknown **Repo**…"` (Owner sin escribir); `sdd-artifacts.spec.ts::"nested-repos R4…"` |
+| R5 | met | `sdd-task-delegation.spec.ts::"SC2…"` (Verify en el `mp/*` del worktree de spec), `"R5: a gate whose Where names another repo…"`, `"G2: … symlinkByRepo is keyed by the task's **Repo** name"`, `"G3…"` |
+| R6 | met | `delegate.spec.ts::"R6/SC4…"`; `secrets-scan.spec.ts` (6 casos, incluidos symlinks, bucles, `.env*` y directorio ilegible) |
+| R7 | met | `adapters.spec.ts::"nested-repos R7…"`; `agy --help` 1.4.2 lista `--mode … plan` |
+| R8 | met | `delegate.spec.ts` (3 casos de `chainByMode`: SC5, write intacto / `failed` / sin config, explícito y `auto`); `config.spec.ts` |
+| R9 | met | `delegate.spec.ts::"R9/SC6…"`; `sdd-task-delegation.spec.ts::"nested-repos R9/SC6…"`; prueba real: `requestedProvider: "codex"` |
+| R10 | met | `sdd-verify.spec.ts::"nested-repos R10/SC7…"` |
+| R11 | met | `delegate.spec.ts::"R11…"`, `sdd-pipeline.spec.ts::"nested-repos R11…"`, `hooks-setup.spec.ts::"nested-repos R11/E5…"` |
+| R12 | met | `doctor.spec.ts::"SC9…"` y `"without nested repos…"` |
+| E1 | met | `delegate.spec.ts::"E1…"` |
+| E2 | met | `repo.spec.ts::"rejects a missing path, a plain directory and a subdirectory…"` |
+| E3 | met | `sdd-task-delegation.spec.ts::"E3…"` |
+| E4 | met | `delegate.spec.ts::"E4…"` y `"G4…"` |
+| E5 | met | `hooks-setup.spec.ts::"nested-repos R11/E5…"` |
+| E6 | met | `delegate.spec.ts::"E6…"` |
+
+Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 23 passed (23) · Tests 315 passed (315)` (baseline 272; +43 nuevos, 0 omitidos salvo el caso `chmod` en Windows/root) · `claude plugin validate .` ✅ · `claude plugin test .` ✅ `12 pass, 0 fail` · Dist ✅ reconstruido · CI multiplataforma: en el push a `main` (merge sin PR, decisión del plan)
+Cross-review: codex en modo read (delegación 20261018065508-4a491e) → 11 hallazgos, todos verificados; 9 resueltos (G1–G5), 1 diferido (G6), 1 descartado (G7)
+Dead-code sweep: `tsc --noUnusedLocals --noUnusedParameters` → 0
+Tests changed: `adapters.spec.ts::"plain spawn…"` (args de agy en read, por el default deliberado de R7) y `secrets-scan.spec.ts` ("no sigue symlinks" → G1). Ninguno por `repo`/`**Repo**`, así que SC8 se cumple
+Success criteria: SC1–SC9 met by tests; SC1 también en una delegación real con codex
+Attribution: none
+Shortcuts declared: R3 es una garantía a nivel de cwd (Q1 a): el puntero `gitdir:` del worktree sigue nombrando el repo de origen

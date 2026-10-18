@@ -25,6 +25,8 @@ export interface DelegateParams {
   fallback?: boolean;
   /** Code repository to work on, relative to the project (a nested repo); default: the project's own repo. */
   repo?: string;
+  /** The repo's name when `repo` is a longer path (an SDD task's `**Repo**` resolved to its spec worktree): `symlinkByRepo` key and accepted `files` prefix. */
+  repoName?: string;
   /** Files the task may change (an entry ending in `/` covers a directory); anything else is reported as drift. */
   scopeFiles?: string[];
   /** Extra "Expected output" lines for the worker (e.g. the SDD Acceptance section). */
@@ -108,8 +110,16 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
   const timeoutMs = params.timeoutMs ?? (mode === "write" ? config.defaults.writeTimeoutMs : config.defaults.timeoutMs);
   const sessionKey = params.sessionId ?? ctx.instanceId;
   // R1: an invalid repo fails before any job, worktree or worker exists.
-  const target = params.repo ? await resolveRepo(ctx.projectDir, params.repo) : undefined;
+  const target = params.repo !== undefined ? await resolveRepo(ctx.projectDir, params.repo) : undefined;
   const codeDir = target?.root ?? ctx.projectDir;
+  // Paths may carry the repo's prefix (`backend-monolith/src/x.ts`): strip one, once.
+  const prefixes = target ? [target.rel, params.repoName].filter((p): p is string => Boolean(p)).map((p) => `${p}/`) : [];
+  const inRepo = (files: string[] | undefined) =>
+    files?.map((f) => {
+      const norm = f.replace(/\\/g, "/");
+      const prefix = prefixes.find((p) => norm.startsWith(p));
+      return prefix ? norm.slice(prefix.length) : f;
+    });
   // The job's controller follows the MCP request's signal and delegation_cancel alike.
   const signal = ctx.jobs
     ? ctx.jobs.start({ id, provider: null, mode, task: taskLabel(params.task), ...(params.sdd ? { sdd: params.sdd } : {}) }, ctx.signal).signal
@@ -125,7 +135,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     const built = await buildPrompt({
       task: params.task,
       mode,
-      files: (params.files ?? []).map((f) => (target && f.replace(/\\/g, "/").startsWith(`${target.rel}/`) ? f.slice(target.rel.length + 1) : f)),
+      files: inRepo(params.files) ?? [],
       projectDir: codeDir,
       maxFileBytes: config.defaults.maxFileBytes,
       maxTotalBytes: config.defaults.maxTotalBytes,
@@ -187,7 +197,9 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
           cwd: repoRoot,
           provider,
           includeUncommitted: config.isolation.includeUncommitted,
-          symlink: (target && config.isolation.symlinkByRepo[target.rel]) || config.isolation.symlink,
+          symlink:
+            (target && (config.isolation.symlinkByRepo[target.rel] ?? (params.repoName ? config.isolation.symlinkByRepo[params.repoName] : undefined))) ??
+            config.isolation.symlink,
           ...(params.sdd ? { sdd: params.sdd } : {}),
         });
       }
@@ -202,7 +214,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
           mode,
           timeoutMs: config.providers[provider].timeoutMs ?? timeoutMs,
           ...(model ? { model } : {}),
-          env: workerEnv(meta),
+          env: workerEnv(meta, process.env, [ctx.projectDir, ...(repoRoot ? [repoRoot] : [])]),
           ...(signal ? { signal } : {}),
           ...(ctx.jobs ? { onProgress: (chunk: string) => ctx.jobs?.progress(id, chunk) } : {}),
           idleTimeoutMs: config.defaults.idleTimeoutMs,
@@ -227,7 +239,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
           });
         }
         if (params.scopeFiles && mode === "write" && changes.files.length > 0) {
-          const outside = outsideScope(changes.files, params.scopeFiles);
+          const outside = outsideScope(changes.files, inRepo(params.scopeFiles)!);
           if (outside.length > 0) {
             violations.push({
               type: "outside_task_files",

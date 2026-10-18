@@ -41,6 +41,13 @@ describe("resolveRepo (nested-repos R1)", () => {
     expect(await code(resolveRepo(root, "backend-monolith/src"))).toBe("REPO_NOT_GIT");
   });
 
+  it("G5: a name that merely starts with '..' is not an escape", async () => {
+    const { root } = makeWorkspace();
+    mkdirSync(path.join(root, "..backend"));
+    makeRepo(path.join(root, "..backend"));
+    expect((await resolveRepo(root, "..backend")).rel).toBe("..backend");
+  });
+
   it("rejects a directory that is not inside any git repository", async () => {
     const dir = tmpDir();
     mkdirSync(path.join(dir, "plain"));

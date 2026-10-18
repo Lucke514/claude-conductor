@@ -54,6 +54,9 @@ async function run(cwd, command, timeoutMs) {
 /** The repo a gate's `Where` names, when it is a repo of the workspace other than the task's (R5 of nested-repos). */
 function otherRepo(where, repos) {
     const name = where.replace(/`/g, "").trim().replace(/\/+$/, "");
+    // A task without **Repo** behaves as before nested-repos: every gate runs.
+    if (!repos.repo)
+        return undefined;
     return name && name !== repos.repo && repos.workspaceRepos?.includes(name) ? name : undefined;
 }
 export async function verifyTask(worktreePath, task, gates, timeoutMs, repos = {}) {

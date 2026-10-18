@@ -31,7 +31,7 @@ export interface ResolvedRepo {
 
 const inside = (root: string, p: string): boolean => {
   const rel = path.relative(root, p);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 };
 
 export async function resolveRepo(projectDir: string, repo: string): Promise<ResolvedRepo> {

@@ -309,6 +309,37 @@ describe("nested-repos: **Repo** in sdd_task_*", () => {
     await removeWorktree(await readMeta(r.worktreePath!));
   });
 
+  it("G2: on the spec worktree, symlinkByRepo is keyed by the task's **Repo** name", async () => {
+    const w = workspace({ specWorktree: true });
+    mkdirSync(path.join(w.specWt!, "node_modules", "dep"), { recursive: true });
+    w.ctx.config = testConfig({ chain: ["codex", "claude"], isolation: { symlinkByRepo: { "backend-monolith": ["node_modules"] } } });
+    await claim(w);
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, w.ctx);
+    expect((await readMeta(r.worktreePath!)).symlinks).toEqual(["node_modules"]);
+    expect(existsSync(path.join(r.worktreePath!, "node_modules", "dep"))).toBe(true);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("G3: a task without **Repo** still runs a gate whose Where names a nested repo", async () => {
+    const s = setup(TASKS, {});
+    const plan = PLAN.replace("| Tests | `node -e \"process.exit(0)\"` | `here` |", "| Tests | `node -e \"process.exit(0)\"` | `backend` |");
+    writeFeature(s.repo, "demo", { "spec.md": SPEC, "plan.md": plan, "tasks.md": TASKS });
+    mkdirSync(path.join(s.repo, "backend"));
+    makeRepo(path.join(s.repo, "backend"));
+    git(s.repo, "add", "specs");
+    git(s.repo, "commit", "-qm", "plan with a backend gate");
+    await claimAndCommit(s);
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, s.ctx);
+    expect(r.sdd.verification.find((v) => v.gate === "Tests")).toMatchObject({ result: "pass" });
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
   it("R5: a gate whose Where names another repo of the workspace stays manual", async () => {
     const plan = PLAN.replace("| Tests | `node -e \"process.exit(0)\"` | `here` |", "| Tests | `node -e \"process.exit(0)\"` | `here` |\n| Web | `node -e \"process.exit(0)\"` | `web-app` | `exit 0` |");
     const w = workspace({ plan });

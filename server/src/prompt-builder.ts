@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import path from "node:path";
 import type { Mode } from "./providers/types.js";
 
@@ -37,7 +37,7 @@ export interface BuiltPrompt {
 
 /** Files that must never be read into a prompt (credentials / secrets). */
 const SENSITIVE: RegExp[] = [
-  /(^|[\\/])\.env(\..*)?$/i,
+  /(^|[\\/])\.env[^\\/]*$/i,
   /(^|[\\/])\.codex[\\/]/i,
   /(^|[\\/])auth\.json$/i,
   /(^|[\\/])\.gemini[\\/]/i,
@@ -63,6 +63,14 @@ const LANG: Record<string, string> = {
   ".sh": "bash", ".yml": "yaml", ".yaml": "yaml", ".sql": "sql", ".css": "css", ".html": "html", ".cs": "csharp",
 };
 
+function realOrNull(p: string): string | null {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return null;
+  }
+}
+
 async function readFileForPrompt(
   rel: string,
   projectDir: string,
@@ -77,6 +85,16 @@ async function readFileForPrompt(
   }
   if (isSensitivePath(abs) || isSensitivePath(display)) {
     return { report: { path: display, included: false, reason: "sensitive file (credentials/secrets) — never shared" } };
+  }
+  // A symlink is judged by what it points to: `settings.txt -> .env` is still a secret.
+  const real = realOrNull(abs);
+  if (real) {
+    const root = realOrNull(projectDir) ?? projectDir;
+    const relReal = path.relative(root, real);
+    if (relReal === ".." || relReal.startsWith(`..${path.sep}`) || path.isAbsolute(relReal)) {
+      return { report: { path: display, included: false, reason: "outside project directory (symlink)" } };
+    }
+    if (isSensitivePath(real)) return { report: { path: display, included: false, reason: "sensitive file (credentials/secrets) — never shared" } };
   }
   let buf: Buffer;
   try {

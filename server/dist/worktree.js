@@ -4,6 +4,7 @@ import path from "node:path";
 import { git, gitOk, repoRootOf } from "./git.js";
 import { patchesDir, worktreesDir } from "./paths.js";
 import { isSensitivePath } from "./prompt-builder.js";
+import { scanSecrets } from "./secrets-scan.js";
 const META_FILE = "mp-meta.json";
 export const BLOCK_HOOK = `#!/bin/sh
 # multi-provider: only Claude Code may commit or push from a delegation worktree.
@@ -58,12 +59,12 @@ export async function createWorktree(opts) {
     const symlinks = [];
     const skippedSymlinks = [];
     for (const rel of opts.symlink) {
-        if (isSensitivePath(rel)) {
+        const src = path.join(repoRoot, rel);
+        const dst = path.join(wtPath, rel);
+        if (await linksSecrets(rel, src)) {
             skippedSymlinks.push(rel);
             continue;
         }
-        const src = path.join(repoRoot, rel);
-        const dst = path.join(wtPath, rel);
         if (!existsSync(src) || existsSync(dst))
             continue;
         await fs.mkdir(path.dirname(dst), { recursive: true });
@@ -85,6 +86,24 @@ export async function createWorktree(opts) {
     };
     await fs.writeFile(path.join(gitDir, META_FILE), JSON.stringify(meta, null, 2));
     return meta;
+}
+/**
+ * Whether a `symlink` entry would hand secrets to the worker (nested-repos R3): its name
+ * or its real target is sensitive, or it is a directory holding `.env*` files.
+ * Dependency directories (`node_modules`) are not searched: their files are packages.
+ */
+async function linksSecrets(rel, src) {
+    if (isSensitivePath(rel))
+        return true;
+    if (!existsSync(src))
+        return false;
+    const real = realOrResolved(src);
+    if (isSensitivePath(real))
+        return true;
+    if (path.basename(rel) === "node_modules" || !(await fs.stat(src)).isDirectory())
+        return false;
+    const scan = await scanSecrets(src);
+    return scan.found.length > 0 || scan.truncated;
 }
 /** `GIT_CONFIG_*` entries appended after any already present in env (git >= 2.31). */
 export function gitConfigEnv(entries, env = process.env) {
