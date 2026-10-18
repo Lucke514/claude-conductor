@@ -166,4 +166,4 @@ Dead-code sweep: 1 hit, fixed — `workerGitEnv` (`server/src/worktree.ts`) had 
 Excluded from inventory: none
 Documentation: `docs/sdd-guardrails.md` (with Operating), README and skill match the names in the code (checked by grep against `server/src`)
 Success criteria: SC1 met on emission — `worker_push` is emitted and audited (`guardrails.spec.ts` R6 and R8 cases); its value is read on the user's remote · SC2 pending — needs a real `codex` run asking it to push and open a PR, on the user's machine
-Integration: pending review (PR to main)
+Integration: merged (Lucke514/claude-conductor#9, merged by the user)
