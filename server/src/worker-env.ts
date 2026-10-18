@@ -43,6 +43,12 @@ export async function ensureShims(): Promise<void> {
   }
 }
 
+/**
+ * Variables holding the project's or the server's absolute path. A worker in a
+ * nested repo's worktree must not learn where the source tree (and its `.env`) is.
+ */
+export const PROJECT_PATH_ENV = ["CLAUDE_PROJECT_DIR", "MP_PROJECT_DIR", "PWD", "OLDPWD", "INIT_CWD"] as const;
+
 /** The PATH variable's own name (`Path` on Windows), so we never end up with two. */
 export function pathKey(env: NodeJS.ProcessEnv): string {
   return Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
@@ -55,7 +61,7 @@ export function pathKey(env: NodeJS.ProcessEnv): string {
 export function workerEnv(meta?: Pick<WorktreeMeta, "hooksDir">, env: NodeJS.ProcessEnv = process.env): Record<string, string | undefined> {
   const key = pathKey(env);
   const out: Record<string, string | undefined> = {};
-  for (const name of CREDENTIAL_ENV) out[name] = undefined;
+  for (const name of [...CREDENTIAL_ENV, ...PROJECT_PATH_ENV]) out[name] = undefined;
   const entries: [string, string][] = [["credential.helper", ""]];
   if (meta) entries.push(["core.hooksPath", meta.hooksDir]);
   Object.assign(out, gitConfigEnv(entries, env), {

@@ -387,6 +387,82 @@ describe("nested-repos: delegate with repo", () => {
     await removeWorktree(meta);
   });
 
+  it("R3/SC1: the worker sees the nested repo's tracked files, never its .env, nor the workspace's path", async () => {
+    const { root, nested } = makeWorkspace();
+    const probeFile = path.join(tmpDir(), "probe.json");
+    const promptFile = path.join(tmpDir(), "prompt.txt");
+    const pwd = process.env.PWD;
+    Object.assign(process.env, {
+      FAKE_MODE: "probe-secrets",
+      FAKE_PROBE_FILE: probeFile,
+      FAKE_PROMPT_FILE: promptFile,
+      FAKE_FORBIDDEN_PATH: [root, realpathSync(root)].join(","),
+      CLAUDE_PROJECT_DIR: root,
+      MP_PROJECT_DIR: root,
+      PWD: nested,
+    });
+    try {
+      const r = await delegate({ provider: "codex", task: "review backend-monolith", repo: "backend-monolith", files: ["package.json", ".env"] }, ctx(root));
+      expect(r.status).toBe("success");
+      const probe = JSON.parse(readFileSync(probeFile, "utf8"));
+      expect(probe.cwd).toContain("package.json");
+      expect(probe.cwd).not.toContain(".env");
+      expect(probe.packageJson.ok).toBe(true);
+      expect(probe.env).toEqual({ ok: false, code: "ENOENT" });
+      expect(probe.leaks).toEqual([]);
+      const prompt = readFileSync(promptFile, "utf8");
+      expect(prompt).not.toContain("prod-secret");
+      expect(prompt).not.toContain(root);
+      expect(prompt).not.toContain(realpathSync(root));
+      expect(r.files.find((f) => f.path === ".env")?.reason).toMatch(/sensitive/);
+    } finally {
+      for (const k of ["FAKE_PROBE_FILE", "FAKE_PROMPT_FILE", "FAKE_FORBIDDEN_PATH", "CLAUDE_PROJECT_DIR", "MP_PROJECT_DIR"]) delete process.env[k];
+      if (pwd === undefined) delete process.env.PWD;
+      else process.env.PWD = pwd;
+    }
+  });
+
+  it("R3: a symlink entry naming secrets is skipped and noted; the hooks live outside the source repo's .git", async () => {
+    const { root, nested } = makeWorkspace();
+    process.env.FAKE_MODE = "write";
+    const r = await delegate(
+      { provider: "codex", task: "t", mode: "write", repo: "backend-monolith" },
+      ctx(root, { isolation: { symlinkByRepo: { "backend-monolith": [".env", "config/.env.production"] } } }),
+    );
+    const meta = await readMeta(r.worktreePath!);
+    expect(meta.symlinks).toEqual([]);
+    expect(meta.skippedSymlinks).toEqual([".env", "config/.env.production"]);
+    expect(existsSync(path.join(r.worktreePath!, ".env"))).toBe(false);
+    expect(r.notes?.some((n) => n.includes("symlink skipped") && n.includes(".env"))).toBe(true);
+    const rel = path.relative(realpathSync(nested), realpathSync(meta.hooksDir));
+    expect(rel.startsWith("..") || path.isAbsolute(rel)).toBe(true);
+    expect(existsSync(path.join(meta.hooksDir, "pre-commit"))).toBe(true);
+    await removeWorktree(meta);
+    expect(existsSync(meta.hooksDir)).toBe(false);
+  });
+
+  it("R3: a worker in a nested repo's worktree still cannot commit", async () => {
+    const { root, nested } = makeWorkspace();
+    process.env.FAKE_MODE = "try-commit";
+    const r = await delegate({ provider: "codex", task: "t", mode: "write", repo: "backend-monolith" }, ctx(root));
+    expect(r.output).toContain("commit blocked");
+    expect(git(nested, "log", "--oneline").split("\n")).toHaveLength(2);
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("E4: a tracked .env named in files stays out of the prompt", async () => {
+    const { root, nested } = makeWorkspace();
+    writeFileSync(path.join(nested, ".gitignore"), "");
+    git(nested, "add", "-A");
+    git(nested, "commit", "-qm", "track .env");
+    const promptFile = path.join(tmpDir(), "prompt.txt");
+    process.env.FAKE_PROMPT_FILE = promptFile;
+    const r = await delegate({ provider: "codex", task: "t", repo: "backend-monolith", files: ["backend-monolith/.env"] }, ctx(root));
+    delete process.env.FAKE_PROMPT_FILE;
+    expect(r.files[0]?.reason).toMatch(/sensitive/);
+    expect(readFileSync(promptFile, "utf8")).not.toContain("prod-secret");
+  });
+
   it("E1: a nested repo without commits names the repo", async () => {
     const root = makeRepo();
     const empty = path.join(root, "fresh");

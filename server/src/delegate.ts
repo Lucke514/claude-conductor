@@ -168,6 +168,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
           ...(params.sdd ? { sdd: params.sdd } : {}),
         });
       }
+      if (meta?.skippedSymlinks) notes.push(`symlink skipped (credentials/secrets are never linked into a worktree): ${meta.skippedSymlinks.join(", ")}`);
       ctx.jobs?.setProvider(id, provider, meta);
       const model = provider === params.provider ? params.model : undefined;
       let result: ProviderResult;

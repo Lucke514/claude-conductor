@@ -45,8 +45,8 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
 
 ## T2 — Sin rutas ni secretos del origen en el worker
 
-- [ ] Open
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C2 · **Implements**: R3, E4
 - **Files**: `server/src/worktree.ts`, `server/src/worker-env.ts`, `server/src/delegate.ts`, `server/tests/fixtures/fake-codex.mjs`, `server/tests/delegate.spec.ts`, `server/tests/guardrails.spec.ts`
 - **Do**:
@@ -61,11 +61,12 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
   - un `Files` con un `.env` versionado queda fuera del prompt (E4);
   - los tests existentes siguen pasando.
 - **Verify**: `npm --prefix server test -- delegate guardrails`
+- **Notes**: Hecha por Claude. `createWorktree` omite las entradas de `symlink` con `isSensitivePath` (`meta.skippedSymlinks`, nota en `delegate`). Los hooks bloqueantes pasan a `hooksDirFor(wtPath)` = `<repoKey>/.hooks/<worktree>` bajo el directorio del plugin, que `removeWorktree` borra; los worktrees antiguos conservan su `hooksDir` en `meta`. `workerEnv` quita `PROJECT_PATH_ENV` (`CLAUDE_PROJECT_DIR`, `MP_PROJECT_DIR`, `PWD`, `OLDPWD`, `INIT_CWD`). `fake-codex.mjs` gana `FAKE_MODE=probe-secrets`. 4 casos nuevos en `delegate.spec.ts` (SC1, symlink/hooks, commit bloqueado, E4). Gates: typecheck 0 errores, 285 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: el puntero `gitdir:` del `.git` del worktree sigue nombrando el repo de origen (riesgo residual aceptado en Q1)
 
 ## T3 — `**Repo**` en `sdd_task_*` y gates por repo
 
 - [ ] Open
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C3 · **Implements**: R4, R5, E3
 - **Files**: `server/src/sdd/artifacts.ts`, `server/src/sdd/task-delegation.ts`, `server/src/sdd/verify.ts`, `server/src/repo.ts`, `server/tests/sdd-fixtures.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/sdd-verify.spec.ts`, `server/tests/sdd-artifacts.spec.ts`
 - **Do**:

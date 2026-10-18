@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Fake `codex` CLI for tests. Behaviour selected with FAKE_MODE.
 import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const args = process.argv.slice(2);
@@ -97,6 +97,27 @@ process.stdin.on("end", () => {
       };
       if (process.env.FAKE_PROBE_FILE) writeFileSync(process.env.FAKE_PROBE_FILE, JSON.stringify(probe));
       out({ type: "item.completed", item: { id: "i2", type: "agent_message", text: process.env.FAKE_MESSAGE ?? "## Summary\nprobed" } });
+      out({ type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } });
+      process.exit(0);
+      break;
+    }
+    case "probe-secrets": {
+      // A worker poking around for secrets: lists its cwd, reads package.json and .env, and
+      // looks for the workspace's path in its environment (FAKE_FORBIDDEN_PATH, comma-separated).
+      const tryRead = (f) => {
+        try {
+          return { ok: true, text: readFileSync(path.join(cwd, f), "utf8") };
+        } catch (err) {
+          return { ok: false, code: err.code };
+        }
+      };
+      const forbidden = (process.env.FAKE_FORBIDDEN_PATH ?? "").split(",").filter(Boolean);
+      const leaks = Object.entries(process.env)
+        .filter(([k, v]) => !k.startsWith("FAKE_") && forbidden.some((p) => v?.includes(p)))
+        .map(([k]) => k);
+      const probe = { cwd: readdirSync(cwd).sort(), packageJson: tryRead("package.json"), env: tryRead(".env"), leaks };
+      if (process.env.FAKE_PROBE_FILE) writeFileSync(process.env.FAKE_PROBE_FILE, JSON.stringify(probe));
+      out({ type: "item.completed", item: { id: "i2", type: "agent_message", text: "## Summary\nprobed secrets" } });
       out({ type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } });
       process.exit(0);
       break;

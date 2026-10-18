@@ -36,6 +36,11 @@ export async function ensureShims() {
             await fs.writeFile(file, content, { mode: 0o755 });
     }
 }
+/**
+ * Variables holding the project's or the server's absolute path. A worker in a
+ * nested repo's worktree must not learn where the source tree (and its `.env`) is.
+ */
+export const PROJECT_PATH_ENV = ["CLAUDE_PROJECT_DIR", "MP_PROJECT_DIR", "PWD", "OLDPWD", "INIT_CWD"];
 /** The PATH variable's own name (`Path` on Windows), so we never end up with two. */
 export function pathKey(env) {
     return Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
@@ -47,7 +52,7 @@ export function pathKey(env) {
 export function workerEnv(meta, env = process.env) {
     const key = pathKey(env);
     const out = {};
-    for (const name of CREDENTIAL_ENV)
+    for (const name of [...CREDENTIAL_ENV, ...PROJECT_PATH_ENV])
         out[name] = undefined;
     const entries = [["credential.helper", ""]];
     if (meta)

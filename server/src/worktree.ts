@@ -3,6 +3,7 @@ import { existsSync, promises as fs, realpathSync } from "node:fs";
 import path from "node:path";
 import { git, gitOk, repoRootOf } from "./git.js";
 import { patchesDir, worktreesDir } from "./paths.js";
+import { isSensitivePath } from "./prompt-builder.js";
 
 /**
  * Isolated git worktrees for delegated work.
@@ -24,6 +25,8 @@ export interface WorktreeMeta {
   createdAt: string;
   hooksDir: string;
   symlinks: string[];
+  /** `symlink` entries left out because they name credentials or secrets (nested-repos R3). */
+  skippedSymlinks?: string[];
   /** The spec-driven task this worktree works on (sdd_task_delegate). */
   sdd?: { slug: string; taskId: string };
 }
@@ -60,6 +63,13 @@ function stamp(d = new Date()): string {
   );
 }
 
+/**
+ * The worktree's blocking hooks live next to it under the plugin's directory, not in its
+ * git dir: inside a worktree that is `<source repo>/.git/worktrees/…`, and `core.hooksPath`
+ * would hand the source repo's absolute path to the worker (nested-repos R3).
+ */
+export const hooksDirFor = (wtPath: string): string => path.join(path.dirname(wtPath), ".hooks", path.basename(wtPath));
+
 /** git -c core.hooksPath=<dir> so the user's hooks don't run on our plumbing. */
 const quietHooks = (dir: string) => ["-c", `core.hooksPath=${dir}`];
 
@@ -93,14 +103,19 @@ export async function createWorktree(opts: {
   await gitOk([...quietHooks(emptyHooks), "worktree", "add", "-b", branch, wtPath, base], repoRoot);
 
   const gitDir = await gitOk(["rev-parse", "--absolute-git-dir"], wtPath);
-  const hooksDir = path.join(gitDir, "mp-hooks");
+  const hooksDir = hooksDirFor(wtPath);
   await fs.mkdir(hooksDir, { recursive: true });
   for (const name of ["pre-commit", "pre-push", "pre-merge-commit", "pre-rebase"]) {
     await fs.writeFile(path.join(hooksDir, name), BLOCK_HOOK, { mode: 0o755 });
   }
 
   const symlinks: string[] = [];
+  const skippedSymlinks: string[] = [];
   for (const rel of opts.symlink) {
+    if (isSensitivePath(rel)) {
+      skippedSymlinks.push(rel);
+      continue;
+    }
     const src = path.join(repoRoot, rel);
     const dst = path.join(wtPath, rel);
     if (!existsSync(src) || existsSync(dst)) continue;
@@ -119,6 +134,7 @@ export async function createWorktree(opts: {
     createdAt: new Date().toISOString(),
     hooksDir,
     symlinks,
+    ...(skippedSymlinks.length ? { skippedSymlinks } : {}),
     ...(opts.sdd ? { sdd: opts.sdd } : {}),
   };
   await fs.writeFile(path.join(gitDir, META_FILE), JSON.stringify(meta, null, 2));
@@ -236,6 +252,7 @@ export async function removeWorktree(meta: Pick<WorktreeMeta, "repoRoot" | "path
   const noHooks = quietHooks(path.join(worktreesDir(), ".no-hooks"));
   await git([...noHooks, "worktree", "remove", "--force", meta.path], meta.repoRoot);
   await fs.rm(meta.path, { recursive: true, force: true }).catch(() => undefined);
+  await fs.rm(hooksDirFor(meta.path), { recursive: true, force: true }).catch(() => undefined);
   await git(["worktree", "prune"], meta.repoRoot);
   if (meta.branch.startsWith("mp/")) await git(["branch", "-D", meta.branch], meta.repoRoot);
 }
