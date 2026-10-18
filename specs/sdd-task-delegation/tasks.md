@@ -11,7 +11,7 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 ## T1 — Lector de artefactos SDD
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C1 · **Implements**: R1, R2, E1, E2, E4, E7, E8
 - **Files**: `server/src/sdd/artifacts.ts`, `server/tests/sdd-artifacts.spec.ts`
 - **Do**: Implementar `loadFeature(projectDir, slug)` y `resolveTask(feature, ref)` según C1: Status de cada artefacto, tareas con sus campos y `[P]`, texto literal de `R#`/`E#` de `spec.md`, secciones `### C#` y tabla Quality gates de `plan.md`, modo Small desde `## Tasks` del `spec.md`. Errores con slugs disponibles (E1), tareas abiertas y owners (E2) e id inexistente en `Implements`/`Component` (E4).
