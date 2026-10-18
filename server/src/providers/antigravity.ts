@@ -229,10 +229,8 @@ export class AntigravityAdapter implements ProviderAdapter {
     let permission: AgyStream["permission"];
     let pending = "";
     const onOutput = (chunk: string) => {
-      if (!stream) {
-        req.onProgress?.(chunk);
-        return;
-      }
+      // Text output is the answer itself (it can quote files): it keeps the idle clock alive but is not forwarded (E6).
+      if (!stream) return;
       const lines = (pending + chunk).split(/\r?\n/);
       pending = lines.pop() ?? "";
       for (const line of lines) {

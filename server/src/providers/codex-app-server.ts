@@ -19,8 +19,11 @@ import type { ErrorType, ProviderRequest, ProviderResult, TokenUsage } from "./t
 
 const INIT_TIMEOUT_MS = 15_000;
 const INTERRUPT_GRACE_MS = 5_000;
-/** Streaming deltas we never read: the final items carry the full text. */
-const OPT_OUT = ["item/agentMessage/delta", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded", "item/reasoning/textDelta", "item/commandExecution/outputDelta"];
+/**
+ * Notifications we never subscribe away: streaming deltas (command output, reasoning) are
+ * what keeps the idle clock alive during a long, productive step. Their payloads are ignored.
+ */
+const OPT_OUT: string[] = [];
 
 interface RpcMessage {
   id?: number | string;
@@ -88,6 +91,12 @@ export async function runAppServer(cfg: ProviderConfig, req: ProviderRequest, bi
   let stderr = "";
   let exited = false;
   let exitCode: number | null = null;
+  // A closed pipe (the app-server died) must not crash the MCP server: fail what is pending instead.
+  child.stdin?.on("error", (err: Error) => {
+    for (const p of pending.values()) p.resolve({ error: { code: -1, message: `app-server input failed: ${err.message}` } });
+    pending.clear();
+    turnDone?.("failed", { message: `app-server input failed: ${err.message}` });
+  });
   const send = (m: RpcMessage) => {
     if (!child.stdin?.destroyed) child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", ...m })}\n`);
   };
@@ -160,7 +169,7 @@ export async function runAppServer(cfg: ProviderConfig, req: ProviderRequest, bi
       }
       case "error":
         lastError = (params.error as { message?: string } | undefined)?.message ?? "error";
-        req.onProgress?.(`error: ${lastError}\n`);
+        req.onProgress?.("provider error\n");
         break;
       case "turn/completed": {
         const turn = (params.turn ?? {}) as { status?: string; error?: { message?: string; codexErrorInfo?: unknown } };
@@ -195,6 +204,7 @@ export async function runAppServer(cfg: ProviderConfig, req: ProviderRequest, bi
 
   // Stops: total timeout, idle timeout, cancellation. Interrupt first, then kill.
   let stopReason: "timeout" | "stalled" | "cancelled" | undefined;
+  let graceTimer: NodeJS.Timeout | undefined;
   let threadId: string | undefined;
   let turnId: string | undefined;
   const stop = (reason: "timeout" | "stalled" | "cancelled") => {
@@ -204,10 +214,11 @@ export async function runAppServer(cfg: ProviderConfig, req: ProviderRequest, bi
     // The turn then ends with turn/completed (interrupted); if Codex does not answer in time, kill it.
     if (threadId && turnId) {
       void request("turn/interrupt", { threadId, turnId });
-      setTimeout(() => {
+      graceTimer = setTimeout(() => {
         turnDone?.("interrupted");
         killTree(child.pid, "SIGKILL");
-      }, INTERRUPT_GRACE_MS).unref();
+      }, INTERRUPT_GRACE_MS);
+      graceTimer.unref();
     } else {
       killTree(child.pid, "SIGKILL");
       turnDone?.("interrupted");
@@ -238,13 +249,20 @@ export async function runAppServer(cfg: ProviderConfig, req: ProviderRequest, bi
     if (stopReason === "timeout") return { ...base(), ok: false, output: message, error: { type: "TIMEOUT", message: "turn exceeded timeout and was interrupted" } };
     return undefined;
   };
+  // Never return (or fall back to exec) while the app-server may still be running.
   const cleanup = async () => {
     clearTimeout(total);
     clearTimeout(idle);
+    clearTimeout(graceTimer);
     req.signal?.removeEventListener("abort", onAbort);
     child.stdin?.end();
+    if (exited) return;
     killTree(child.pid, "SIGTERM");
-    await Promise.race([exitedPromise, new Promise((r) => setTimeout(r, 2000).unref())]);
+    const gone = await Promise.race([exitedPromise.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 2000).unref())]);
+    if (!gone) {
+      killTree(child.pid, "SIGKILL");
+      await Promise.race([exitedPromise, new Promise((r) => setTimeout(r, 1000).unref())]);
+    }
   };
 
   try {

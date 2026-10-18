@@ -88,6 +88,9 @@ export async function runChain(order, deps) {
             continue;
         }
         for (let retry = 0;; retry++) {
+            // A cancel during the backoff below must not start another attempt.
+            if (deps.signal?.aborted)
+                return cancelled();
             const result = await deps.execute(entry, adapter);
             await deps.onAttempt?.(entry, result);
             if (result.ok) {

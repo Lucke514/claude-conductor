@@ -171,6 +171,21 @@ describe("provider-reliability R7: attributable failures", () => {
     expect(a.breaker.snapshot("codex").consecutiveFailures).toBe(1);
   });
 
+  it("review fixes: NOT_INSTALLED never opens the breaker; a cancel during backoff starts no new attempt", async () => {
+    const { deps, breaker } = setup({ codex: [err("NOT_INSTALLED")], antigravity: [ok()] });
+    await runChain(["codex", "antigravity", "claude"], deps);
+    expect(breaker.snapshot("codex").consecutiveFailures).toBe(0);
+    const ac = new AbortController();
+    const s = setup({ codex: [err("RATE_LIMIT"), ok()], antigravity: [ok()] });
+    s.deps.sleep.mockImplementation(async () => {
+      ac.abort();
+      return undefined;
+    });
+    const r = await runChain(["codex", "antigravity", "claude"], { ...s.deps, signal: ac.signal });
+    expect(r.status).toBe("cancelled");
+    expect(s.calls).toEqual(["codex"]);
+  });
+
   it("classifyFailure reads the plugin's own kills before the exit code", () => {
     expect(classifyFailure({ exitCode: null, timedOut: false, cancelled: true }, "", {})?.type).toBe("CANCELLED");
     expect(classifyFailure({ exitCode: null, timedOut: false, stalled: true }, "", {})?.type).toBe("STALLED");

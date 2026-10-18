@@ -14,10 +14,13 @@ export const ERROR_TYPES = [
     /** The worker waited for a permission the headless run cannot grant (configuration). */
     "PERMISSION_BLOCKED",
 ];
-/** Failures the plugin or its configuration caused: they never count against the provider. */
-const NOT_ATTRIBUTABLE = ["CANCELLED", "STALLED", "PERMISSION_BLOCKED"];
+/**
+ * The failures a provider is to blame for (R7). Everything else — cancelled, stalled, a
+ * permission the headless run cannot grant, a binary that is not installed — never counts.
+ */
+const ATTRIBUTABLE = ["AUTH", "QUOTA", "RATE_LIMIT", "PARSE_ERROR", "EMPTY_OUTPUT", "NON_ZERO_EXIT", "TIMEOUT"];
 export function isAttributable(type) {
-    return !NOT_ATTRIBUTABLE.includes(type);
+    return ATTRIBUTABLE.includes(type);
 }
 export const PROVIDER_NAMES = ["codex", "antigravity"];
 //# sourceMappingURL=types.js.map

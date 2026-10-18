@@ -16,8 +16,11 @@ import { buildChildEnv, killTree, resolveCommand } from "../process.js";
  */
 const INIT_TIMEOUT_MS = 15_000;
 const INTERRUPT_GRACE_MS = 5_000;
-/** Streaming deltas we never read: the final items carry the full text. */
-const OPT_OUT = ["item/agentMessage/delta", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded", "item/reasoning/textDelta", "item/commandExecution/outputDelta"];
+/**
+ * Notifications we never subscribe away: streaming deltas (command output, reasoning) are
+ * what keeps the idle clock alive during a long, productive step. Their payloads are ignored.
+ */
+const OPT_OUT = [];
 /** The app-server could not be used at all: the caller falls back to `codex exec` (E1). */
 export class TransportUnavailable extends Error {
 }
@@ -67,6 +70,13 @@ export async function runAppServer(cfg, req, bin) {
     let stderr = "";
     let exited = false;
     let exitCode = null;
+    // A closed pipe (the app-server died) must not crash the MCP server: fail what is pending instead.
+    child.stdin?.on("error", (err) => {
+        for (const p of pending.values())
+            p.resolve({ error: { code: -1, message: `app-server input failed: ${err.message}` } });
+        pending.clear();
+        turnDone?.("failed", { message: `app-server input failed: ${err.message}` });
+    });
     const send = (m) => {
         if (!child.stdin?.destroyed)
             child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", ...m })}\n`);
@@ -142,7 +152,7 @@ export async function runAppServer(cfg, req, bin) {
             }
             case "error":
                 lastError = params.error?.message ?? "error";
-                req.onProgress?.(`error: ${lastError}\n`);
+                req.onProgress?.("provider error\n");
                 break;
             case "turn/completed": {
                 const turn = (params.turn ?? {});
@@ -176,6 +186,7 @@ export async function runAppServer(cfg, req, bin) {
     });
     // Stops: total timeout, idle timeout, cancellation. Interrupt first, then kill.
     let stopReason;
+    let graceTimer;
     let threadId;
     let turnId;
     const stop = (reason) => {
@@ -186,10 +197,11 @@ export async function runAppServer(cfg, req, bin) {
         // The turn then ends with turn/completed (interrupted); if Codex does not answer in time, kill it.
         if (threadId && turnId) {
             void request("turn/interrupt", { threadId, turnId });
-            setTimeout(() => {
+            graceTimer = setTimeout(() => {
                 turnDone?.("interrupted");
                 killTree(child.pid, "SIGKILL");
-            }, INTERRUPT_GRACE_MS).unref();
+            }, INTERRUPT_GRACE_MS);
+            graceTimer.unref();
         }
         else {
             killTree(child.pid, "SIGKILL");
@@ -226,13 +238,21 @@ export async function runAppServer(cfg, req, bin) {
             return { ...base(), ok: false, output: message, error: { type: "TIMEOUT", message: "turn exceeded timeout and was interrupted" } };
         return undefined;
     };
+    // Never return (or fall back to exec) while the app-server may still be running.
     const cleanup = async () => {
         clearTimeout(total);
         clearTimeout(idle);
+        clearTimeout(graceTimer);
         req.signal?.removeEventListener("abort", onAbort);
         child.stdin?.end();
+        if (exited)
+            return;
         killTree(child.pid, "SIGTERM");
-        await Promise.race([exitedPromise, new Promise((r) => setTimeout(r, 2000).unref())]);
+        const gone = await Promise.race([exitedPromise.then(() => true), new Promise((r) => setTimeout(() => r(false), 2000).unref())]);
+        if (!gone) {
+            killTree(child.pid, "SIGKILL");
+            await Promise.race([exitedPromise, new Promise((r) => setTimeout(r, 1000).unref())]);
+        }
     };
     try {
         const init = await request("initialize", { clientInfo: { name: "multi-provider", title: "claude-conductor multi-provider", version: "1" }, capabilities: { experimentalApi: false, optOutNotificationMethods: OPT_OUT } }, INIT_TIMEOUT_MS);

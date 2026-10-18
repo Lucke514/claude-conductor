@@ -228,6 +228,8 @@ function stopper(opts: RunOptions, kill: (reason: StopReason) => void) {
   };
   const onAbort = () => stop("cancelled");
   opts.signal?.addEventListener("abort", onAbort, { once: true });
+  // Aborted while the runner was starting (e.g. loading node-pty): stop right after it is wired.
+  if (opts.signal?.aborted) queueMicrotask(onAbort);
   touch();
   return {
     touch,

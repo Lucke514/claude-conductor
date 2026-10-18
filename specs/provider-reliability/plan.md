@@ -63,7 +63,7 @@ Se descartaron tres alternativas:
 
 **Base**: `main` @ `94f65eb` más `fix/readonly-tool-annotations` (`61d2d5e`) fusionada antes de la primera tarea. Rama de feature `feature/provider-reliability`.
 
-**Integration**: un PR a `main` con los checks `test` (matriz), `dist` y `plugin`, para que la matriz multiplataforma corra antes del merge. Windows importa por `killTree`.
+**Integration**: merge local a `main` sin PR, a pedido del usuario (ver Decisions del spec); los checks `test` (matriz, incluido Windows para `killTree`), `dist` y `plugin` corren en el CI del push.
 
 **Task span**: `— a task is claimed for at most 7 days`
 

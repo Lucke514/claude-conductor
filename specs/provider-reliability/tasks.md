@@ -209,6 +209,17 @@ Orden: T1 → T2 → T3 → T4 → T5. Después, T6 y T7 a la vez (no comparten 
 
 ## Gaps found in verification
 
+Hallazgos de una revisión independiente en modo read con codex (delegación 20261018060252-3f2197, 86 s). Claude verificó cada uno contra el código; todos se resolvieron en un mismo commit, con tests.
+
+- [x] **G1** — `codex-app-server.ts`: sin listener de `error` en stdin, un `EPIPE` tumbaba el servidor MCP. Ahora falla lo pendiente y el turno.
+- [x] **G2** — E6: `codex exec` y agy en modo texto reenviaban la salida cruda (que puede citar archivos) a `progress` y `state.json`. Ahora exec emite solo etiquetas de evento, agy texto no emite nada y el error de app-server se reporta como `provider error`. Decisión: las líneas de comando (`command: npm test`) se mantienen recortadas, porque no son prompt, archivos ni entorno.
+- [x] **G3** — `codex-app-server.ts`: la limpieza no escalaba a `SIGKILL` ni limpiaba el timer de gracia. Ahora SIGTERM, 2 s, SIGKILL y espera acotada.
+- [x] **G4** — `codex-app-server.ts`: excluir los deltas mataba como `STALLED` un comando largo y productivo. Ahora no se excluye ninguna notificación y sus payloads se ignoran.
+- [x] **G5** — `fallback.ts`: un cancel durante el backoff arrancaba otro intento. Ahora se comprueba la señal antes de cada intento.
+- [x] **G6** — `process.ts`: un abort mientras cargaba node-pty se perdía. `stopper()` ahora atiende una señal ya abortada.
+- [x] **G7** — `codex.ts`: un exec que se colgaba tras responder podía darse por bueno. Ahora `clean` exige `!r.stalled`.
+- [x] **G8** — `types.ts`: `NOT_INSTALLED` contaba para el breaker. Ahora `isAttributable` es una lista explícita según R7. Se rechazó la otra mitad del hallazgo (contar el `TIMEOUT` con cambios antes de `partial`): R7 dice que no es atribuible.
+
 ---
 
 ## Verification reports

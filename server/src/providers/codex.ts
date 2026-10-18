@@ -90,6 +90,23 @@ export function parseCodexJsonl(stdout: string): CodexParsed {
   return parsed;
 }
 
+/** `codex exec --json` lines → one label per event (`item.completed reasoning`), never their text. */
+function execProgress(onProgress: (chunk: string) => void): (chunk: string) => void {
+  let pending = "";
+  return (chunk) => {
+    const lines = (pending + chunk).split(/\r?\n/);
+    pending = lines.pop() ?? "";
+    for (const line of lines) {
+      try {
+        const ev = JSON.parse(line) as CodexEvent;
+        if (ev.type) onProgress(`${ev.type}${ev.item?.type ? ` ${ev.item.type}` : ""}\n`);
+      } catch {
+        /* stray log line: not forwarded */
+      }
+    }
+  };
+}
+
 export class CodexAdapter implements ProviderAdapter {
   readonly name = "codex" as const;
 
@@ -140,7 +157,8 @@ export class CodexAdapter implements ProviderAdapter {
       env: { NO_COLOR: "1", ...req.env },
       usePty: this.cfg.usePty ?? false,
       ...(req.signal ? { signal: req.signal } : {}),
-      ...(req.onProgress ? { onOutput: req.onProgress } : {}),
+      // Progress gets event types only: agent messages can quote files (E6).
+      ...(req.onProgress ? { onOutput: execProgress(req.onProgress) } : {}),
       ...(req.idleTimeoutMs ? { idleTimeoutMs: req.idleTimeoutMs } : {}),
     });
     const model = req.model ?? this.cfg.model;
@@ -149,7 +167,7 @@ export class CodexAdapter implements ProviderAdapter {
     if (r.cancelled) return { ...base, ok: false, output: parsed.finalMessage, error: { type: "CANCELLED", message: "delegation cancelled" } };
     const diagnostic = [r.stderr, ...parsed.errors].join("\n");
 
-    const clean = r.exitCode === 0 && !r.timedOut && parsed.finalMessage.trim() !== "";
+    const clean = r.exitCode === 0 && !r.timedOut && !r.stalled && parsed.finalMessage.trim() !== "";
     const failure = clean ? undefined : classifyFailure(r, diagnostic, patterns);
     if (failure) {
       return { ...base, ok: false, output: parsed.finalMessage, error: failure, ...(parsed.usage ? { usage: parsed.usage } : {}) };

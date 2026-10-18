@@ -211,10 +211,9 @@ export class AntigravityAdapter {
         let permission;
         let pending = "";
         const onOutput = (chunk) => {
-            if (!stream) {
-                req.onProgress?.(chunk);
+            // Text output is the answer itself (it can quote files): it keeps the idle clock alive but is not forwarded (E6).
+            if (!stream)
                 return;
-            }
             const lines = (pending + chunk).split(/\r?\n/);
             pending = lines.pop() ?? "";
             for (const line of lines) {

@@ -42,7 +42,9 @@ describe("delegation jobs", () => {
       return s[0]?.progress.length && s[0].files?.length ? s : undefined;
     }, "progress and files");
     expect(job).toMatchObject({ provider: "codex", mode: "write", phase: "running", files: ["added-by-worker.txt"], filesChanged: 1 });
-    expect(job!.progress.join("\n")).toContain("working");
+    // Event labels only: the worker's message text never reaches progress (E6).
+    expect(job!.progress.join("\n")).toContain("item.completed reasoning");
+    expect(job!.progress.join("\n")).not.toContain("working");
     const mirrored = (await store.read()).jobs ?? [];
     expect(mirrored).toEqual([expect.objectContaining({ id: job!.id, provider: "codex", task: "long refactor of the payments module", pid: process.pid })]);
 

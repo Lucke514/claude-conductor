@@ -154,6 +154,12 @@ describe("AntigravityAdapter", () => {
     expect(JSON.parse(readFileSync(process.env.FAKE_ARGS_FILE, "utf8")).args).not.toContain("--dangerously-skip-permissions");
   });
 
+  it("E6: agy in text mode forwards no output to progress; codex exec forwards event labels only", async () => {
+    const seen: string[] = [];
+    await agy({ outputFormat: "text", usePty: false }).run({ ...req(tmpDir()), onProgress: (c) => seen.push(c) });
+    expect(seen).toEqual([]);
+  });
+
   it("E2: an agy without stream-json falls back to text with a note", async () => {
     process.env.FAKE_MODE = "unknown-flag";
     const r = await agy({}).run(req(tmpDir()));

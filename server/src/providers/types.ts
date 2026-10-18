@@ -17,11 +17,14 @@ export const ERROR_TYPES = [
 
 export type ErrorType = (typeof ERROR_TYPES)[number];
 
-/** Failures the plugin or its configuration caused: they never count against the provider. */
-const NOT_ATTRIBUTABLE: readonly ErrorType[] = ["CANCELLED", "STALLED", "PERMISSION_BLOCKED"];
+/**
+ * The failures a provider is to blame for (R7). Everything else — cancelled, stalled, a
+ * permission the headless run cannot grant, a binary that is not installed — never counts.
+ */
+const ATTRIBUTABLE: readonly string[] = ["AUTH", "QUOTA", "RATE_LIMIT", "PARSE_ERROR", "EMPTY_OUTPUT", "NON_ZERO_EXIT", "TIMEOUT"];
 
 export function isAttributable(type: ErrorType | "CIRCUIT_OPEN"): boolean {
-  return !(NOT_ATTRIBUTABLE as readonly string[]).includes(type);
+  return ATTRIBUTABLE.includes(type);
 }
 
 export const PROVIDER_NAMES = ["codex", "antigravity"] as const;
