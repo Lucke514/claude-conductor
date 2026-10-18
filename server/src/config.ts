@@ -41,6 +41,10 @@ const RoutingTarget = z.union([
 
 export const ConfigSchema = z.object({
   chain: z.array(ChainEntry).min(1).default(["codex", "antigravity", "claude"]),
+  /** Per-mode chains that replace `chain` in that mode (nested-repos R8), e.g. read: ["codex", "claude"]. */
+  chainByMode: z
+    .object({ read: z.array(ChainEntry).min(1).optional(), write: z.array(ChainEntry).min(1).optional() })
+    .prefault({}),
   routing: z.record(z.string(), RoutingTarget).default({}),
   defaults: z
     .object({

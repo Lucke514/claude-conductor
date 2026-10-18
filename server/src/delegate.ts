@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { appendAudit } from "./audit.js";
 import type { MpConfig } from "./config.js";
-import { resolveOrder, routeTask, runChain, type Attempt, type ChainEntry } from "./fallback.js";
+import { chainFor, resolveOrder, routeTask, runChain, type Attempt, type ChainEntry } from "./fallback.js";
 import { repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
@@ -130,9 +130,12 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
       ...(params.extraOutput ? { extraOutput: params.extraOutput } : {}),
     });
 
-    const routing = params.provider === "auto" ? routeTask(params.task, config.routing, params.taskType) : undefined;
+    const chain = chainFor(config, mode);
+    const routed = params.provider === "auto" ? routeTask(params.task, config.routing, params.taskType) : undefined;
+    // R8: a route to a provider outside this mode's chain is ignored; an explicit provider is still tried first.
+    const routing = routed && chain.includes(routed.provider) ? routed : undefined;
     const first = params.provider === "auto" ? routing?.provider : params.provider;
-    const order: ChainEntry[] = resolveOrder(config.chain, first, params.provider === "auto" ? true : (params.fallback ?? true));
+    const order: ChainEntry[] = resolveOrder(chain, first, params.provider === "auto" ? true : (params.fallback ?? true));
 
     const adapters = ctx.adapters ?? makeAdapters(config);
     const breaker = makeBreaker(config);
@@ -141,6 +144,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
 
     const violations: NonNullable<DelegateResponse["violations"]> = [];
     const notes: string[] = [];
+    if (routed && !routing) notes.push(`routing rule '${routed.rule}' points to ${routed.provider}, which is not in the ${mode} chain (${chain.join(" → ")}); ignored`);
     let kept: { meta: WorktreeMeta; changes: Changes } | undefined;
 
     const repoRoot = target?.root ?? (await repoRootOf(ctx.projectDir));

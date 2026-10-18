@@ -127,8 +127,8 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
 
 ## T6 — Cadena por modo
 
-- [ ] Open
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C6 · **Implements**: R8
 - **Files**: `server/src/config.ts`, `server/src/fallback.ts`, `server/src/delegate.ts`, `server/src/sdd/task-delegation.ts`, `server/tests/config.spec.ts`, `server/tests/delegate.spec.ts`
 - **Do**:
@@ -141,11 +141,12 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
   - un `provider` explícito fuera de la cadena se intenta primero;
   - sin `chainByMode`, todo sigue igual.
 - **Verify**: `npm --prefix server test -- config delegate fallback`
+- **Notes**: Hecha por Claude. `chainByMode` (`read`/`write`, cada uno `.min(1)`) en `config.ts`, y `chainFor(config, mode)` en `fallback.ts`. En `delegate()`, una ruta de `auto` fuera de la cadena del modo se ignora con una nota (`routing` queda sin definir), y un proveedor explícito se intenta primero. `pickProvider` de `sdd_task_claim` usa la cadena de write. `state.chain` sigue mostrando `chain`. Tests: 3 en `delegate.spec.ts` (SC5, write/failed/sin config, explícito y `auto`) y 1 en `config.spec.ts`. Gates: typecheck 0 errores, 303 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: none
 
 ## T7 — `requestedProvider` y `Verify` con varios comandos
 
 - [ ] Open
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C7 · **Implements**: R9, R10
 - **Files**: `server/src/delegate.ts`, `server/src/state.ts`, `server/src/sdd/task-delegation.ts`, `server/tests/delegate.spec.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/sdd-artifacts.spec.ts`, `server/tests/sdd-verify.spec.ts`
 - **Do**:

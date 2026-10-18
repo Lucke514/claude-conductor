@@ -50,6 +50,10 @@ export function backoffDelay(retry, attempt) {
  * Build the order to try: an explicit provider goes first, followed by the rest
  * of the configured chain (unless fallback is disabled).
  */
+/** The chain for a mode: `chainByMode[mode]` when set, else `chain`. */
+export function chainFor(config, mode) {
+    return config.chainByMode[mode] ?? config.chain;
+}
 export function resolveOrder(chain, first, fallback = true) {
     if (!first)
         return [...chain];

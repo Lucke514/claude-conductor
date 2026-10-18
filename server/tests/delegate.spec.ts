@@ -525,6 +525,61 @@ describe("nested-repos: delegate with repo", () => {
   });
 });
 
+describe("nested-repos R8: chainByMode", () => {
+  /** Codex fails with AUTH; antigravity answers. Records who was called. */
+  function adapters() {
+    const calls: string[] = [];
+    const make = (name: ProviderName, ok: boolean): ProviderAdapter => ({
+      name,
+      isAvailable: async () => true,
+      healthCheck: async () => ({}) as never,
+      run: async () => {
+        calls.push(name);
+        return ok
+          ? { ok: true, output: "## Summary\nok", exitCode: 0, durationMs: 1 }
+          : { ok: false, output: "", exitCode: 1, durationMs: 1, error: { type: "AUTH", message: "401 Unauthorized" } };
+      },
+    });
+    return { calls, adapters: { codex: make("codex", false), antigravity: make("antigravity", true) } };
+  }
+  const byMode = { chainByMode: { read: ["codex", "claude"] } };
+
+  it("SC5: with chainByMode.read [codex, claude] and codex down, read falls back to claude and never calls agy", async () => {
+    const a = adapters();
+    const r = await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo(), byMode), adapters: a.adapters });
+    expect(r.status).toBe("fallback_to_claude");
+    expect(a.calls).toEqual(["codex"]);
+  });
+
+  it("the write chain stays `chain`; a read chain without claude ends failed; no chainByMode keeps today's order", async () => {
+    let a = adapters();
+    const w = await delegate({ provider: "codex", task: "t", mode: "write" }, { ...ctx(makeRepo(), byMode), adapters: a.adapters });
+    expect(a.calls).toEqual(["codex", "antigravity"]);
+    expect(w.provider).toBe("antigravity");
+    a = adapters();
+    const f = await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo(), { chainByMode: { read: ["codex"] } }), adapters: a.adapters });
+    expect(f.status).toBe("failed");
+    a = adapters();
+    await delegate({ provider: "codex", task: "t" }, { ...ctx(makeRepo()), adapters: a.adapters });
+    expect(a.calls).toEqual(["codex", "antigravity"]);
+  });
+
+  it("an explicit provider outside the mode's chain is tried first; an auto route outside it is ignored with a note", async () => {
+    let a = adapters();
+    const r = await delegate({ provider: "antigravity", task: "t" }, { ...ctx(makeRepo(), byMode), adapters: a.adapters });
+    expect(a.calls).toEqual(["antigravity"]);
+    expect(r.status).toBe("success");
+    a = adapters();
+    const auto = await delegate(
+      { provider: "auto", task: "refactor this", taskType: "refactor" },
+      { ...ctx(makeRepo(), { ...byMode, routing: { refactor: "antigravity" } }), adapters: a.adapters },
+    );
+    expect(a.calls).toEqual(["codex"]);
+    expect(auto.routing).toBeUndefined();
+    expect(auto.notes?.some((n) => n.includes("not in the read chain"))).toBe(true);
+  });
+});
+
 describe("gitConfigEnv", () => {
   it("appends to existing GIT_CONFIG_* entries", () => {
     const hooks: [string, string][] = [["core.hooksPath", "/h"]];

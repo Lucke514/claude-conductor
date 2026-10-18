@@ -8,6 +8,16 @@ import { tmpDir } from "./helpers.js";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe("config validation", () => {
+  it("nested-repos: chainByMode, symlinkByRepo and allowCwdWithSecrets default empty/off and validate", () => {
+    const c = parseConfig({});
+    expect(c.chainByMode).toEqual({});
+    expect(c.isolation.symlinkByRepo).toEqual({});
+    expect(c.isolation.allowCwdWithSecrets).toBe(false);
+    expect(parseConfig({ chainByMode: { read: ["codex", "claude"] } }).chainByMode.read).toEqual(["codex", "claude"]);
+    expect(() => parseConfig({ chainByMode: { read: [] } })).toThrow(ConfigError);
+    expect(() => parseConfig({ chainByMode: { write: ["gemini"] } })).toThrow(/chainByMode\.write/);
+  });
+
   it("applies defaults to an empty config", () => {
     const c = parseConfig({});
     expect(c.chain).toEqual(["codex", "antigravity", "claude"]);

@@ -1,5 +1,5 @@
 import { delegate, type DelegateContext, type DelegateResponse } from "../delegate.js";
-import { routeTask } from "../fallback.js";
+import { chainFor, routeTask } from "../fallback.js";
 import { PROVIDER_NAMES, type Mode, type ProviderName } from "../providers/types.js";
 import { resolveTaskRepo, workspaceRepos, type TaskRepo } from "../repo.js";
 import { checkReferences, loadFeature, resolveTask, SddError, type SddFeature, type SddTask } from "./artifacts.js";
@@ -51,10 +51,12 @@ const OWNER_RE = new RegExp(`^(${PROVIDER_NAMES.join("|")}) \\(multi-provider\\)
 
 function pickProvider(requested: ProviderName | "auto", feature: SddFeature, task: SddTask, ctx: DelegateContext): ProviderName {
   if (requested !== "auto") return requested;
+  // Tasks are delegated in write mode by default: its chain decides (nested-repos R8).
+  const chain = chainFor(ctx.config, "write");
   const routed = routeTask(`${task.title}\n${task.do ?? ""}`, ctx.config.routing);
-  if (routed) return routed.provider;
-  const first = ctx.config.chain.find((p): p is ProviderName => p !== "claude");
-  if (!first) throw new SddError("TASK_CLAIMED", `the chain (${ctx.config.chain.join(" → ")}) has no provider to claim ${task.id} of ${feature.slug} for — do it with Claude`);
+  if (routed && chain.includes(routed.provider)) return routed.provider;
+  const first = chain.find((p): p is ProviderName => p !== "claude");
+  if (!first) throw new SddError("TASK_CLAIMED", `the chain (${chain.join(" → ")}) has no provider to claim ${task.id} of ${feature.slug} for — do it with Claude`);
   return first;
 }
 

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { appendAudit } from "./audit.js";
-import { resolveOrder, routeTask, runChain } from "./fallback.js";
+import { chainFor, resolveOrder, routeTask, runChain } from "./fallback.js";
 import { repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt } from "./prompt-builder.js";
@@ -54,9 +54,12 @@ export async function delegate(params, ctx) {
             maxTotalBytes: config.defaults.maxTotalBytes,
             ...(params.extraOutput ? { extraOutput: params.extraOutput } : {}),
         });
-        const routing = params.provider === "auto" ? routeTask(params.task, config.routing, params.taskType) : undefined;
+        const chain = chainFor(config, mode);
+        const routed = params.provider === "auto" ? routeTask(params.task, config.routing, params.taskType) : undefined;
+        // R8: a route to a provider outside this mode's chain is ignored; an explicit provider is still tried first.
+        const routing = routed && chain.includes(routed.provider) ? routed : undefined;
         const first = params.provider === "auto" ? routing?.provider : params.provider;
-        const order = resolveOrder(config.chain, first, params.provider === "auto" ? true : (params.fallback ?? true));
+        const order = resolveOrder(chain, first, params.provider === "auto" ? true : (params.fallback ?? true));
         const adapters = ctx.adapters ?? makeAdapters(config);
         const breaker = makeBreaker(config);
         const state = await ctx.store.read();
@@ -64,6 +67,8 @@ export async function delegate(params, ctx) {
             breaker.load(p, state.providers[p]?.breaker);
         const violations = [];
         const notes = [];
+        if (routed && !routing)
+            notes.push(`routing rule '${routed.rule}' points to ${routed.provider}, which is not in the ${mode} chain (${chain.join(" → ")}); ignored`);
         let kept;
         const repoRoot = target?.root ?? (await repoRootOf(ctx.projectDir));
         // R11: remember the nested repo so cleanup and status find its mp/* worktrees.
