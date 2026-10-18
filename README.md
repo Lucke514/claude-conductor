@@ -42,7 +42,7 @@ Después ejecuta **`/mp-setup`** (ver más abajo): desactiva la atribución, ins
 git clone https://github.com/Lucke514/claude-conductor && cd claude-conductor
 npm install && npm run build      # instala server/ y compila con tsc
 npm test                          # vitest (server/tests/*.spec.ts)
-claude plugin test .              # tests de la conductor card (tests/*.test.tsx)
+claude plugin test .              # tests del conductor header (tests/*.test.tsx)
 claude --plugin-dir .             # probar el plugin sin instalarlo
 ```
 
@@ -186,33 +186,48 @@ Claude verifica → ACCEPT: delegation_apply (git apply --3way) + commit propio 
 
 Todo esto es un respaldo frente a bugs conocidos en los que el setting no se respeta.
 
-## Conductor card (banda encima del prompt)
+## Conductor header (banda encima del prompt)
 
-Además de la status line, el plugin dibuja una **card propia encima del prompt**: la orquesta de proveedores de un vistazo. Usa los módulos de UI para plugins de Claude Code (API en *early access*; probado con **v2.1.302**). En versiones que no los soportan, la card simplemente no aparece y el resto del plugin funciona igual.
+Además de la status line, el plugin dibuja un **header propio encima del prompt**, siempre expandido: la sesión, la orquesta de proveedores y el spec SDD activo de un vistazo. Usa los mods de Claude Code (probado con **v2.1.302**). En versiones que no los soportan, el header simplemente no aparece y el resto del plugin funciona igual.
 
 ```text
-╭────────────────────────────────────────────────────────────────────────────────────╮
-│ ◆ conductor  ·  sesión 4 delegaciones · 13.5k tok   partitura codex → agy → claude │
-│ codex  ● afinado        3 llamadas · 12k tok · 1m42s                     ▁▂▅▃▇     │
-│ agy    ◐ silencio 2m    circuito abierto · RATE_LIMIT ×3                 ▃▁▁▁▁     │
-│ última  codex · review src/auth · ✓ ACCEPT · hace 4m              e: expandir      │
-╰────────────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ◆ conductor  claude-conductor · feature/sdd-guardrails  ·  sesión 4 delegaciones · 13.5k tok         │
+│                                                         Opus 5.5  ctx ━━━━────── 42%  $0.50           │
+│ ╭ codex ────────── ● afinado ╮  ╭ agy ─────── ◐ silencio 2m ╮  ╭ sdd-guardrails ──── T2 en curso ╮    │
+│ │ codex-cli 0.48 · auth ok   │  │ auth desconocida          │  │ spec-driven · tasks approved   │    │
+│ │ hoy     ▮▮▮▯▯▯▯▯▯▯ 3       │  │ hoy     ▮▯▯▯▯▯▯▯▯▯ 1      │  │ tasks   ▮▮▮▯▯▯▯▯▯▯ 1/3         │    │
+│ │ tokens  ▮▮▮▮▮▮▮▮▮▮ 12k     │  │ tokens  ▯▯▯▯▯▯▯▯▯▯ —      │  │ Gate auto-delegation           │    │
+│ │ circuito cerrado · 0 fallos│  │ RATE_LIMIT ×3 · reintenta │  │ owner codex (multi-provider)   │    │
+│ ╰────────────────────────────╯  ╰───────────────────────────╯  ╰────────────────────────────────╯    │
+│ últimas delegaciones                                                                                 │
+│ 11:56  codex       read   review src/auth                                ✓ ACCEPT                    │
+│ 1 /providers-status  2 /providers-config  3 limpiar worktrees  4 /mp-doctor  5 clean-terminal         │
+│                                                                          codex → agy → claude        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-- **Compacta** (por defecto): estado de cada proveedor, uso del día, mini-gráfica de las últimas llamadas y la última delegación con el veredicto del worker.
-- **Expandida** (`e`, con la banda enfocada mediante `ctrl+x tab` o un clic): una tarjeta por proveedor con barras de llamadas, tokens y tiempo, versión, auth y circuito con cuenta atrás; las últimas delegaciones; y los atajos `1` `/providers-status`, `2` `/providers-config` y `3` limpiar worktrees.
-- **Estados**:
-  - *en curso*: borde latón, spinner, modo y reloj de la delegación activa;
-  - *primer uso*: te sugiere el primer `/delegate` y `/mp-setup`;
-  - *degradado*: el rojo solo aparece en lo que bloquea, siempre con su arreglo (`codex login`…);
-  - *solo Claude*: proveedores tachados en la partitura.
-- Plegarla: el `[-]` que dibuja Claude Code (o `ctrl+x ctrl+a`). Desactivarla del todo: `"card": { "enabled": false }` en `multiprovider.json`.
-- **Datos**: igual que la status line, solo lee `~/.claude/multi-provider/state.json` (refresco cada 10 s y al terminar cada delegación) y nunca invoca los CLIs.
-  - Para alimentarla, el servidor guarda ahí las últimas 8 delegaciones (con los primeros 60 caracteres de la tarea, solo en local; el log de auditoría sigue sin contenido) y el historial de las últimas 10 llamadas por proveedor.
-  - El veredicto `ACCEPT / REQUEST_CHANGES / DISCARD` sale del informe de `codex-worker` / `agy-worker` y se guarda en el almacenamiento del plugin.
-- Diseño: [artefacto "Conductor terminal card"](https://claude.ai/artifact/55uqG9zjRWAzcB4ckzXMJx) (privado; compártelo desde su menú Share si quieres que otros lo vean).
+- **Siempre expandido**: no hay versión compacta. La conversación avanza y hace scroll por encima; el header se queda fijo junto al prompt.
+- **Sesión**: repo y rama, delegaciones y tokens de la sesión, modelo, uso de contexto (`ctx`) y costo, leídos de `$.session` cada 5 s.
+- **Proveedores**: una tarjeta por proveedor con estado, versión, auth, barras de llamadas, tokens y tiempo del día, y circuito con cuenta atrás. Durante una delegación, la tarjeta del proveedor muestra `⠹ tocando · write · 00:42` con borde latón y la tarea debajo.
+- **Spec activo** (si el proyecto usa [spec-driven](https://github.com/Lucke514/spec-driven)): lee `specs/*/tasks.md` (o el `## Tasks` de un `spec.md` Small) y muestra la feature con una tarea reclamada o, si no hay, la primera `approved` con tareas abiertas: tarea en curso o siguiente, avance `hechas/total` y owner.
+- **Atajos**: `1` `/providers-status`, `2` `/providers-config`, `3` limpiar worktrees, `4` `/mp-doctor`, `5` clean-terminal (los dígitos funcionan escribiéndolos solos en el prompt vacío).
+- **Estados**: *en curso* (borde latón), *primer uso* (sugiere `/delegate auto` y `/mp-doctor`), *degradado* (rojo solo en lo que bloquea, con su arreglo) y *solo Claude* (proveedores tachados en la cadena).
+- Desactivarlo: `"card": { "enabled": false }` en `multiprovider.json`.
 
-Código: `hooks/conductor/card.tsx` (render y eventos), `hooks/conductor/model.ts` (vista pura, testeada con Vitest), `types/index.d.ts` (contrato de su estado) y `tests/conductor-card.test.tsx` (`claude plugin test .`).
+### `/clean-terminal`: limpiar la pantalla sin perder el contexto
+
+`/clean-terminal` (o el atajo `5`) oculta todas las filas del transcript dibujadas hasta ese momento: mensajes, llamadas a herramientas y resultados. **La conversación no se toca**: Claude conserva todo el contexto y sigue donde estaba; solo cambia lo que se dibuja. Lo nuevo que llegue después se ve con normalidad.
+
+- El header muestra `─ terminal limpia · contexto intacto (ctx 42%) · N filas ocultas` con el botón **ver historial** (`h`), que vuelve a mostrar todo.
+- No es `/clear`: `/clear` sí borra el contexto. El plugin nunca lo invoca.
+- En el renderizado a pantalla completa el cambio es inmediato. En el renderizado clásico, las filas que ya se imprimieron en el scrollback de la terminal desaparecen al redibujar (`ctrl+l`).
+
+**Datos**: igual que la status line, lee `~/.claude/multi-provider/state.json` (cada 5 s y al terminar cada delegación) y nunca invoca los CLIs. El servidor guarda ahí las últimas 8 delegaciones (con los primeros 60 caracteres de la tarea, solo en local) y las últimas 10 llamadas por proveedor. El veredicto `ACCEPT / REQUEST_CHANGES / DISCARD` sale del informe de `codex-worker` / `agy-worker`.
+
+Diseño: [artefacto "Conductor terminal card"](https://claude.ai/artifact/55uqG9zjRWAzcB4ckzXMJx) (privado; compártelo desde su menú Share si quieres que otros lo vean).
+
+Código: `hooks/conductor/card.tsx` (render, eventos y `/clean-terminal`), `hooks/conductor/model.ts` (vista pura, testeada con Vitest), `types/index.d.ts` (contrato de su estado) y `tests/conductor-card.test.tsx` (`claude plugin test .`).
 
 ## Status line
 
@@ -274,7 +289,7 @@ Instalación: el formato actual de plugins **no** permite declarar `statusLine` 
 
 - typecheck y Vitest en Linux, macOS y Windows, con Node 20 y 22;
 - comprobación de que `server/dist` está al día con `src` (se versiona porque el plugin se instala sin build);
-- `claude plugin validate .` y `claude plugin test .` (los tests de la conductor card).
+- `claude plugin validate .` y `claude plugin test .` (los tests del conductor header).
 
 ## Estructura
 

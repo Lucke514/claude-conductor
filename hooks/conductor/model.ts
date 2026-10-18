@@ -356,3 +356,88 @@ export function parseVerdict(text: string): { verdict: string; id?: string } | u
   const id = text.match(/delegation:\s*([0-9]{14}-[0-9a-f]{6})/)?.[1];
   return { verdict: m[1]!, ...(id ? { id } : {}) };
 }
+
+// --- SDD spec progress ---------------------------------------------------------
+
+export interface SpecTask {
+  id: string;
+  title: string;
+  /** " " open, "x" done, "~" waived, ">" deferred, "!" blocked. */
+  box: string;
+  owner: string;
+}
+
+export interface SpecProgress {
+  slug: string;
+  status: string;
+  done: number;
+  total: number;
+  /** The claimed open task, else the next open unclaimed one. */
+  current?: SpecTask & { state: "en curso" | "siguiente" };
+}
+
+const TASK_HEADING = /^## ([TG]\d+)(?: \[P\])? — (.+)$/;
+
+/** Reads the tasks of a spec-driven tasks.md (or a Small spec.md's `## Tasks`). */
+export function parseTasks(md: string): { status: string; tasks: SpecTask[] } {
+  const status = md.match(/^> Status:\s*([\w-]+)/m)?.[1] ?? "draft";
+  const tasks: SpecTask[] = [];
+  let cur: SpecTask | undefined;
+  for (const line of md.split(/\r?\n/)) {
+    const h = line.match(TASK_HEADING);
+    if (h) {
+      cur = { id: h[1]!, title: h[2]!.trim(), box: " ", owner: "—" };
+      tasks.push(cur);
+      continue;
+    }
+    if (!cur) continue;
+    const box = line.match(/^- \[(.)\] (?:Done|Waived|Deferred|Blocked)/);
+    if (box) cur.box = box[1]!;
+    const owner = line.match(/^- \*\*Owner\*\*:\s*(.+)$/);
+    if (owner) cur.owner = owner[1]!.trim();
+  }
+  return { status, tasks };
+}
+
+export function specProgress(slug: string, md: string): SpecProgress {
+  const { status, tasks } = parseTasks(md);
+  // Waived and deferred tasks are closed for this feature: they count as done.
+  const closed = tasks.filter((t) => t.box === "x" || t.box === "~" || t.box === ">").length;
+  const open = tasks.filter((t) => t.box === " ");
+  const claimed = open.find((t) => t.owner !== "—");
+  const next = open.find((t) => t.owner === "—");
+  const progress: SpecProgress = { slug, status, done: closed, total: tasks.length };
+  if (claimed) progress.current = { ...claimed, state: "en curso" };
+  else if (next) progress.current = { ...next, state: "siguiente" };
+  return progress;
+}
+
+/** The feature being worked on: one with a claimed task, else an approved one with open tasks. */
+export function pickActiveSpec(specs: SpecProgress[]): SpecProgress | undefined {
+  return (
+    specs.find((s) => s.current?.state === "en curso") ??
+    specs.find((s) => s.status === "approved" && s.current) ??
+    undefined
+  );
+}
+
+// --- session header --------------------------------------------------------------
+
+export interface SessionMeta {
+  model?: string;
+  ctxPercent?: number;
+  costUsd?: number;
+  repo?: string;
+  branch?: string;
+}
+
+export function fmtCost(usd: number | undefined): string {
+  return usd === undefined ? "" : `$${usd.toFixed(2)}`;
+}
+
+/** Context use as a thin bar, e.g. "━━━━──────" for 42%. */
+export function ctxBar(percent: number | undefined, width = 10): string {
+  const p = Math.max(0, Math.min(100, percent ?? 0));
+  const filled = Math.round((p / 100) * width);
+  return "━".repeat(filled) + "─".repeat(width - filled);
+}
