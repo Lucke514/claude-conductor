@@ -262,24 +262,41 @@ async function managedWorktrees(repoRoot) {
         }
     });
 }
-/** Metadata of every live mp/* worktree of the repository (unreadable ones are skipped). */
-export async function listWorktrees(cwd) {
-    const repoRoot = await repoRootOf(cwd);
-    if (!repoRoot)
-        return [];
+/** The distinct repository roots of the given directories (a spec worktree and its repo stay apart). */
+async function repoRoots(dirs) {
+    const roots = new Map();
+    for (const dir of typeof dirs === "string" ? [dirs] : dirs) {
+        const root = await repoRootOf(dir);
+        if (root && !roots.has(realOrResolved(root)))
+            roots.set(realOrResolved(root), root);
+    }
+    return [...roots.values()];
+}
+/** Metadata of every live mp/* worktree of the repositories (unreadable ones are skipped). */
+export async function listWorktrees(dirs) {
     const metas = [];
-    for (const b of await managedWorktrees(repoRoot)) {
-        const meta = await readMeta(b.path).catch(() => undefined);
-        if (meta)
-            metas.push(meta);
+    const seen = new Set();
+    for (const repoRoot of await repoRoots(dirs)) {
+        for (const b of await managedWorktrees(repoRoot)) {
+            // Worktrees of one repo are listed by each of its checkouts: keep one entry.
+            if (seen.has(realOrResolved(b.path)))
+                continue;
+            seen.add(realOrResolved(b.path));
+            const meta = await readMeta(b.path).catch(() => undefined);
+            if (meta)
+                metas.push(meta);
+        }
     }
     return metas;
 }
-/** Remove every mp/* worktree of a repository (optionally only older than maxAgeMs). */
-export async function cleanupWorktrees(cwd, maxAgeMs = 0) {
-    const repoRoot = await repoRootOf(cwd);
-    if (!repoRoot)
-        return [];
+/** Remove every mp/* worktree of the repositories (optionally only older than maxAgeMs). */
+export async function cleanupWorktrees(dirs, maxAgeMs = 0) {
+    const removed = [];
+    for (const repoRoot of await repoRoots(dirs))
+        removed.push(...(await cleanupRepo(repoRoot, maxAgeMs)));
+    return removed;
+}
+async function cleanupRepo(repoRoot, maxAgeMs) {
     const removed = [];
     for (const b of await managedWorktrees(repoRoot)) {
         if (maxAgeMs > 0) {

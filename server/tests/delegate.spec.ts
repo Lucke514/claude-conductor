@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { delegate } from "../src/delegate.js";
 import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
-import { applyWorktree, cleanupWorktrees, readMeta, removeWorktree } from "../src/worktree.js";
+import { knownRepoDirs } from "../src/repo.js";
+import { applyWorktree, cleanupWorktrees, listWorktrees, readMeta, removeWorktree } from "../src/worktree.js";
 import type { ProviderAdapter, ProviderName } from "../src/providers/types.js";
 import { FAKE_CODEX, isAlive, makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
 
@@ -461,6 +462,24 @@ describe("nested-repos: delegate with repo", () => {
     delete process.env.FAKE_PROMPT_FILE;
     expect(r.files[0]?.reason).toMatch(/sensitive/);
     expect(readFileSync(promptFile, "utf8")).not.toContain("prod-secret");
+  });
+
+  it("R11: a nested repo is registered; listing and cleanup reach its mp/* worktrees, foreign registrations are ignored", async () => {
+    const { root, nested } = makeWorkspace();
+    const c = ctx(root);
+    process.env.FAKE_MODE = "write";
+    const r = await delegate({ provider: "codex", task: "t", mode: "write", repo: "backend-monolith", sdd: { slug: "demo", taskId: "T3" } }, c);
+    const state = await c.store.read();
+    expect(state.repos?.map((p) => realpathSync(p))).toEqual([realpathSync(nested)]);
+    // The root alone does not see it; with the registry it does.
+    expect(await listWorktrees(root)).toEqual([]);
+    const outside = makeRepo();
+    const dirs = knownRepoDirs(root, [...state.repos!, outside, path.join(root, "gone")]);
+    expect(dirs).toHaveLength(2);
+    expect((await listWorktrees(dirs)).map((m) => m.sdd)).toEqual([{ slug: "demo", taskId: "T3" }]);
+    expect((await cleanupWorktrees(dirs)).map((p) => path.basename(p))).toEqual([path.basename(r.worktreePath!)]);
+    expect(existsSync(r.worktreePath!)).toBe(false);
+    expect(git(nested, "branch", "--list", "mp/*")).toBe("");
   });
 
   it("E1: a nested repo without commits names the repo", async () => {

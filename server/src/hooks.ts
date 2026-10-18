@@ -4,6 +4,7 @@ import { loadConfig, type MpConfig } from "./config.js";
 import { scrubCommand } from "./gh-scrub.js";
 import { checkHealth } from "./health.js";
 import { runProcess } from "./process.js";
+import { knownRepoDirs } from "./repo.js";
 import { StateStore } from "./state.js";
 import { assertManagedPath, cleanupWorktrees } from "./worktree.js";
 
@@ -250,9 +251,15 @@ export async function sessionStart(input: HookInput): Promise<HookOutput> {
   } catch (err) {
     return { systemMessage: `multi-provider: invalid configuration — ${(err as Error).message}` };
   }
-  // Housekeeping: drop delegation worktrees older than 24h.
-  await cleanupWorktrees(dir, 24 * 3600_000).catch(() => undefined);
-  const statuses = await checkHealth(config, new StateStore()).catch(() => []);
+  // Housekeeping: drop delegation worktrees older than 24h, also in the nested repos (E5: forget the ones gone).
+  const store = new StateStore();
+  const state = await store
+    .update((s) => {
+      if (s.repos) s.repos = s.repos.filter((r) => existsSync(r));
+    })
+    .catch(() => undefined);
+  await cleanupWorktrees(knownRepoDirs(dir, state?.repos), 24 * 3600_000).catch(() => undefined);
+  const statuses = await checkHealth(config, store).catch(() => []);
   if (statuses.some((s) => s.available)) return undefined;
   const detail = statuses
     .map((s) => `${s.provider}: ${!s.enabled ? "disabled" : !s.installed ? "not installed" : s.auth === "missing" ? "not authenticated" : s.breaker.state === "open" ? "circuit open" : (s.error ?? "unavailable")}`)

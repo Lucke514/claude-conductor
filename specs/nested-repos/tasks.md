@@ -87,8 +87,8 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
 
 ## T4 — Registro de repos y listados
 
-- [ ] Open
-- **Owner**: claude (sesión principal) since 2026-10-18
+- [x] Done
+- **Owner**: —
 - **Component**: C4 · **Implements**: R11, E5
 - **Files**: `server/src/state.ts`, `server/src/worktree.ts`, `server/src/delegate.ts`, `server/src/index.ts`, `server/src/hooks.ts`, `server/src/sdd/pipeline.ts`, `server/tests/guardrails.spec.ts`, `server/tests/hooks-setup.spec.ts`, `server/tests/sdd-pipeline.spec.ts`
 - **Do**:
@@ -103,11 +103,12 @@ Orden: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9. Casi todas to
   - un repo registrado fuera de `projectDir` se ignora;
   - los tests existentes siguen pasando.
 - **Verify**: `npm --prefix server test -- guardrails hooks-setup sdd-pipeline`
+- **Notes**: Hecha por Claude. `MpState.repos` y `registerRepo` en `state.ts`; `delegate()` registra el repo resuelto. `knownRepoDirs` en `repo.ts` = la raíz más los registrados que existen bajo `projectDir`. `listWorktrees` y `cleanupWorktrees` aceptan una o varias rutas y deduplican raíces y worktrees por `realpath`. `delegation_cleanup`, `SessionStart` (que antes poda del registro los repos que no existen) y `sdd_feature_status` (con `store` opcional en su ctx) usan `knownRepoDirs`. Tests: 1 en `delegate.spec.ts`, 1 en `sdd-pipeline.spec.ts` (orphan_claim resuelto por el registro) y 1 en `hooks-setup.spec.ts` (SessionStart). Gates: typecheck 0 errores, 294 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: none
 
 ## T5 — Guardia de `readMode: "cwd"` y agy en plan
 
 - [ ] Open
-- **Owner**: —
+- **Owner**: claude (sesión principal) since 2026-10-18
 - **Component**: C5 · **Implements**: R6, R7
 - **Files**: `server/src/secrets-scan.ts`, `server/src/delegate.ts`, `server/src/config.ts`, `server/src/providers/antigravity.ts`, `config/multiprovider.example.json`, `server/tests/secrets-scan.spec.ts`, `server/tests/delegate.spec.ts`, `server/tests/adapters.spec.ts`
 - **Do**:

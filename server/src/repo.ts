@@ -90,3 +90,9 @@ export async function workspaceRepos(projectDir: string): Promise<string[]> {
     .map((e) => e.name)
     .sort();
 }
+
+/** The project and the registered repos that still exist under it (R11): where mp/* worktrees can live. */
+export function knownRepoDirs(projectDir: string, registered: string[] = []): string[] {
+  const project = realOrResolved(projectDir);
+  return [projectDir, ...registered.filter((r) => existsSync(r) && inside(project, realOrResolved(r)))];
+}

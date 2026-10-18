@@ -87,6 +87,8 @@ export interface MpState {
   recent?: RecentDelegation[];
   /** Delegations in flight (and recently lost ones), mirrored by the JobRegistry. */
   jobs?: JobSnapshot[];
+  /** Roots of the nested repos delegations have worked on (nested-repos R11): where to look for their mp/* worktrees. */
+  repos?: string[];
 }
 
 const MAX_SESSIONS = 30;
@@ -136,6 +138,10 @@ export class StateStore {
       return s;
     });
   }
+}
+
+export function registerRepo(s: MpState, repoRoot: string): void {
+  if (!(s.repos ??= []).includes(repoRoot)) s.repos.push(repoRoot);
 }
 
 function pruneSessions(s: MpState): void {

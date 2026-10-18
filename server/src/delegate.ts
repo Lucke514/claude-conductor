@@ -7,7 +7,7 @@ import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
 import { PROVIDER_NAMES, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
 import { resolveRepo } from "./repo.js";
-import { recordCall, recordRecent, taskLabel, type StateStore } from "./state.js";
+import { recordCall, recordRecent, registerRepo, taskLabel, type StateStore } from "./state.js";
 import type { JobRegistry } from "./jobs.js";
 import { checkRemotePush, type PushViolation } from "./remote-check.js";
 import { ensureShims, workerEnv } from "./worker-env.js";
@@ -143,6 +143,8 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     let kept: { meta: WorktreeMeta; changes: Changes } | undefined;
 
     const repoRoot = target?.root ?? (await repoRootOf(ctx.projectDir));
+    // R11: remember the nested repo so cleanup and status find its mp/* worktrees.
+    if (target) await ctx.store.update((s) => registerRepo(s, target.root)).catch(() => undefined);
     const isolate = mode === "write" || config.isolation.readMode === "worktree";
     if (mode === "write" && !repoRoot) {
       return finish({

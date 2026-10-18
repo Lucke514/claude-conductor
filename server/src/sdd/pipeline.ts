@@ -2,6 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { statePath } from "../paths.js";
 import type { RecentDelegation } from "../state.js";
+import { knownRepoDirs } from "../repo.js";
+import type { StateStore } from "../state.js";
 import { listWorktrees } from "../worktree.js";
 import { parseScope, parseStatus, parseTasks, parseVerificationReports, readFeatureArtifacts, SddError } from "./artifacts.js";
 import type { ScopeRow, VerificationReport } from "./artifacts.js";
@@ -181,9 +183,10 @@ function summarize(f: FeatureStatus): FeatureSummary {
 /** The sdd_feature_status tool: one feature in full, or a summary of every feature (R6). */
 export async function sddFeatureStatus(
   args: { slug?: string },
-  ctx: { projectDir: string },
+  ctx: { projectDir: string; store?: StateStore },
 ): Promise<FeatureStatus | { features: FeatureSummary[]; notes: string[] }> {
-  const live = (await listWorktrees(ctx.projectDir).catch(() => [])).flatMap((m) => (m.sdd ? [m.sdd] : []));
+  const repos = ctx.store ? (await ctx.store.read()).repos : undefined;
+  const live = (await listWorktrees(knownRepoDirs(ctx.projectDir, repos)).catch(() => [])).flatMap((m) => (m.sdd ? [m.sdd] : []));
   if (args.slug) return featureStatus(ctx.projectDir, args.slug, undefined, live);
   const all = await listFeatureStatus(ctx.projectDir, undefined, live);
   const notes = all.length ? [...new Set(all.flatMap((f) => f.notes))] : ["no SDD features"];

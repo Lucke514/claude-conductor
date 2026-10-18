@@ -2,9 +2,12 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { AUTO_DELEGATE_CONTEXT, extractDelegateResult, postDelegate, preBash, preDelegate, SDD_AUTO_CONTEXT, SDD_DELEGATE_WARNING, splitCommand, userPromptSubmit } from "../src/hooks.js";
+import { AUTO_DELEGATE_CONTEXT, extractDelegateResult, postDelegate, preBash, preDelegate, SDD_AUTO_CONTEXT, SDD_DELEGATE_WARNING, sessionStart, splitCommand, userPromptSubmit } from "../src/hooks.js";
 import { applySettings, installGitHooks, setAutoDelegate, statuslineCommand, setStatuslineMode, uninstallGitHooks } from "../src/setup.js";
-import { makeRepo, tmpDir } from "./helpers.js";
+import { FAKE_AGY, FAKE_CODEX, makeRepo, makeWorkspace, tmpDir } from "./helpers.js";
+import { StateStore } from "../src/state.js";
+import { createWorktree } from "../src/worktree.js";
+import { utimesSync } from "node:fs";
 import { worktreesDir } from "../src/paths.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
@@ -236,5 +239,34 @@ describe("/mp-setup: git commit-msg hook", () => {
     expect(git(repo, "log", "-1", "--format=%B")).toBe("fix: y");
     await uninstallGitHooks(repo);
     expect(() => git(repo, "config", "core.hooksPath")).toThrow();
+  });
+});
+
+describe("nested-repos R11/E5: SessionStart", () => {
+  it("cleans stale mp/* worktrees of registered nested repos and forgets the repos that are gone", async () => {
+    const { root, nested } = makeWorkspace();
+    mkdirSync(path.join(root, ".claude"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".claude", "multiprovider.json"),
+      JSON.stringify({ providers: { codex: { binaryPath: FAKE_CODEX }, antigravity: { binaryPath: FAKE_AGY, usePty: false } } }),
+    );
+    const gone = path.join(tmpDir(), "deleted-repo");
+    const store = new StateStore();
+    await store.update((s) => {
+      s.repos = [nested, gone];
+    });
+    const meta = await createWorktree({ cwd: nested, provider: "codex", includeUncommitted: false, symlink: [] });
+    const old = new Date(Date.now() - 25 * 3600_000);
+    utimesSync(meta.path, old, old);
+    const prev = process.env.CLAUDE_PROJECT_DIR;
+    process.env.CLAUDE_PROJECT_DIR = root;
+    try {
+      await sessionStart({ hook_event_name: "SessionStart" });
+    } finally {
+      if (prev === undefined) delete process.env.CLAUDE_PROJECT_DIR;
+      else process.env.CLAUDE_PROJECT_DIR = prev;
+    }
+    expect(existsSync(meta.path)).toBe(false);
+    expect((await store.read()).repos).toEqual([nested]);
   });
 });
