@@ -134,7 +134,7 @@ Los commits llevan el prefijo `sdd-guardrails: `, los hace solo Claude y van sin
 ### Verification report — sdd-guardrails — 2026-10-18 — pass 1
 
 Change set: `2c0ddcc` (`main@30f6cb7...HEAD`; later commits touch only this file)
-Converged: no — pipeline gates pending (step 4)
+Converged: yes — every R#/E# met, gates with no new failures; SC2 pending as a rollout check
 
 | Req | Verdict | Evidence (case · assertion · clause) |
 |---|---|---|
@@ -153,11 +153,11 @@ Converged: no — pipeline gates pending (step 4)
 | E5 | met | `guardrails.spec.ts::"E5/E8: appends GIT_CONFIG_* entries and reuses the PATH key's own case"` — entries start at index 1, index 0 untouched; runner: `1 passed`; negative control: start forced to 0 → `1 failed` |
 | E6 | met | `guardrails.spec.ts::"an unreachable remote is a note, not a violation; no remotes means no note"` — `http://127.0.0.1:9/x.git` → note `push check skipped: origin:`, no violation; runner: `1 passed`; negative control: failure as violation → `1 failed` |
 | E7 | met | same case, second clause — repo without remotes has no `push check` note; runner: `1 passed` |
-| E8 | partially met | `guardrails.spec.ts::"E5/E8…"` asserts `Path` key reuse and `gh.cmd` exists; PATHEXT resolution on Windows is evidenced only by the CI job `test (windows-latest, …)` running the R5 case — pending (Pipeline below) |
+| E8 | met | `guardrails.spec.ts::"E5/E8…"` asserts `Path` key reuse and `gh.cmd` exists; PATHEXT resolution: the R5 case (`gh pr create` → exit 1 + `GH_SHIM_MESSAGE`, run through `cmd` on win32) passed in CI jobs `test (windows-latest, node 20)` and `test (windows-latest, node 22)`, run 39095769615 |
 | E9 | met | `guardrails.spec.ts::"strips git…"` (response) and `"records specs_modified…"` (response + JSONL) — `secret-value-do-not-leak` absent; runner: `1 passed` each |
 
 Coverage: surfaces API ✅ (R3, R6, R7, R8) · hooks ✅ (R1, R2) · worker environment ✅ (R4, R5) · sensitive ground: access control R4, R5 · traceability R6, R8 · data handling E9 · data lifecycle non-goal · repeat-request correctness non-goal · accessibility non-goal
-Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 17 passed (17) · Tests 197 passed (197)` (baseline 181 passed (181); +16 new, 0 skipped) · `claude plugin validate .` ✅ `√ Validation passed` · `claude plugin test .` ✅ `7 pass, 0 fail` · Pipeline: `dist` ⏳ pending (local build leaves `server/dist` with no diff) · matrix ubuntu/macos/windows × Node 20/22 ⏳ pending
+Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 17 passed (17) · Tests 197 passed (197)` (baseline 181 passed (181); +16 new, 0 skipped) · `claude plugin validate .` ✅ `√ Validation passed` · `claude plugin test .` ✅ `7 pass, 0 fail` · Pipeline: run 39095769615 on `75d4335` — `dist is up to date` ✅ · `claude plugin validate / test` ✅ · `test` ubuntu/macos/windows × Node 20/22 ✅ 6/6
 Attribution: none — no failure required attribution
 Tests removed: none
 Clean-code sweep: 1 hit — `workerGitEnv` left unreached by T1 (only its test called it); removed, its test moved to `gitConfigEnv` · close calls: none
