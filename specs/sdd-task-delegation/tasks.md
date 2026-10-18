@@ -66,7 +66,7 @@ Una tarea = una sesión. Hecha significa: su **Verify** pasa, los gates del plan
 ## T6 — Confirmación en write y `sessionId` para `sdd_task_delegate`
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: claude since 2026-10-18
 - **Component**: C5 · **Implements**: R10
 - **Files**: `server/src/hooks.ts`, `hooks/hooks.json`, `server/tests/hooks-setup.spec.ts`
 - **Do**: `preDelegate` trata `mode` ausente como write cuando la herramienta es `sdd_task_delegate`; añadir su matcher al PreToolUse de `pre-delegate` en `hooks.json`.
