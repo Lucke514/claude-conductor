@@ -6,6 +6,7 @@ import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { runVerify } from "./verify-commands.js";
 import { delegate } from "./delegate.js";
+import { refreshPending } from "./pending.js";
 import { knownRepoDirs, RepoError } from "./repo.js";
 import { SddError } from "./sdd/artifacts.js";
 import { sddFeatureStatus } from "./sdd/pipeline.js";
@@ -15,7 +16,7 @@ import { JobRegistry } from "./jobs.js";
 import { StateStore } from "./state.js";
 import { applyWorktree, cleanupWorktrees, readMeta, removeWorktree } from "./worktree.js";
 
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 
 export function projectDir(): string {
   const env = process.env.MP_PROJECT_DIR ?? process.env.CLAUDE_PROJECT_DIR;
@@ -40,6 +41,8 @@ export function createServer(): McpServer {
   const jobs = new JobRegistry(store);
   // E5: jobs a previous server left running in state.json are marked lost.
   const reconciled = jobs.reconcile();
+  // delegation-lifecycle: the card's count of diffs awaiting review, after anything that changes it.
+  const pending = async () => refreshPending(store, knownRepoDirs(projectDir(), (await store.read().catch(() => undefined))?.repos));
   const server = new McpServer({ name: "multi-provider", version: VERSION });
 
   server.registerTool(
@@ -73,7 +76,9 @@ export function createServer(): McpServer {
       try {
         const dir = projectDir();
         const { config } = await loadConfig(dir);
-        return json(await delegate({ ...args, verify: (wt, signal, onCommand) => runVerify(wt, config, signal, onCommand) }, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs }));
+        const r = await delegate({ ...args, verify: (wt, signal, onCommand) => runVerify(wt, config, signal, onCommand) }, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs });
+        await pending();
+        return json(r);
       } catch (err) {
         return fail(err);
       }
@@ -134,7 +139,9 @@ export function createServer(): McpServer {
     async ({ worktreePath, expectedPatchSha256, allowConflicts }) => {
       try {
         const id = `${Date.now()}-${randomBytes(3).toString("hex")}`;
-        return json(await applyWorktree(worktreePath, id, { expectedPatchSha256, allowConflicts }));
+        const r = await applyWorktree(worktreePath, id, { expectedPatchSha256, allowConflicts });
+        await pending();
+        return json(r);
       } catch (err) {
         return fail(err);
       }
@@ -152,6 +159,7 @@ export function createServer(): McpServer {
       try {
         const meta = await readMeta(worktreePath);
         await removeWorktree(meta);
+        await pending();
         return json({ discarded: true, worktreePath, branch: meta.branch });
       } catch (err) {
         return fail(err);
@@ -210,6 +218,7 @@ export function createServer(): McpServer {
       try {
         const dir = projectDir();
         const result = await cleanupWorktrees(knownRepoDirs(dir, (await store.read()).repos), { maxAgeMs: (olderThanMinutes ?? 1440) * 60_000, force });
+        await pending();
         return json({ ...result, force: force ?? false });
       } catch (err) {
         return fail(err);
@@ -266,7 +275,9 @@ export function createServer(): McpServer {
       try {
         const dir = projectDir();
         const { config } = await loadConfig(dir);
-        return json(await sddTaskDelegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs }));
+        const r = await sddTaskDelegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs });
+        await pending();
+        return json(r);
       } catch (err) {
         return fail(err);
       }
