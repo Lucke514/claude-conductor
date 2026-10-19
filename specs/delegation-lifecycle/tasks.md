@@ -40,8 +40,8 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 
 ## T2 — Limpieza que respeta el estado
 
-- [ ] Done
-- **Owner**: codex (multi-provider) since 2026-10-19
+- [x] Done
+- **Owner**: —
 - **Component**: C2 · **Implements**: R1
 - **Files**: `server/src/worktree.ts`, `server/src/hooks.ts`, `server/src/index.ts`, `server/tests/delegate.spec.ts`, `server/tests/hooks-setup.spec.ts`
 - **Do**:
@@ -60,7 +60,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
   - `delegation_cleanup { force: true }` borra todos y lo dice en la respuesta;
   - un worktree sin meta legible y antiguo se borra.
 - **Verify**: `npm --prefix server test -- delegate hooks-setup`
-- **Notes**: —
+- **Notes**: Delegada a codex (delegación `20261019001812-ffac1a`), revisada y aplicada por Claude. `cleanupWorktrees(dirs, { maxAgeMs = 24 h, force })` devuelve `{ removed, kept }` con `path`, `branch`, `state` y `ageMs`; sin `force` solo borra `discardable` o sin meta legible más antiguos que `maxAgeMs`; una meta antigua sin `state` usa `effectiveState` y, si no puede mirar los cambios, la conserva; una meta corrupta usa el `mtime` del archivo de meta, y una ausente el del directorio. `delegation_cleanup` gana `force` y, sin `olderThanMinutes`, usa 24 h (antes 0 = todo). Las ramas `mp/*` huérfanas solo se borran con `force` o `maxAgeMs: 0`. Tests: 2 en `delegate.spec.ts` y el caso SC1 en `hooks-setup.spec.ts`; dos tests existentes pasan a `force: true`. Gates: typecheck 0 errores, 320 passed, plugin validate ok, plugin test 12 pass. Clean-code: `unlinkSync` importado dinámicamente en el test, movido al import por Claude · close calls: el atajo `3` de la card y la skill siguen diciendo "huérfanos" y "stale ones after 24 h" — T7 los actualiza
 
 ## T3 — Reserva exclusiva por tarea SDD
 

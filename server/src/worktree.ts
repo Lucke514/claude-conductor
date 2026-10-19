@@ -400,22 +400,64 @@ export async function listWorktrees(dirs: string | string[]): Promise<WorktreeMe
   return metas;
 }
 
-/** Remove every mp/* worktree of the repositories (optionally only older than maxAgeMs). */
-export async function cleanupWorktrees(dirs: string | string[], maxAgeMs = 0): Promise<string[]> {
-  const removed: string[] = [];
-  for (const repoRoot of await repoRoots(dirs)) removed.push(...(await cleanupRepo(repoRoot, maxAgeMs)));
-  return removed;
+export interface CleanupEntry {
+  path: string;
+  branch: string;
+  state: LifecycleState | null;
+  ageMs: number | null;
 }
 
-async function cleanupRepo(repoRoot: string, maxAgeMs: number): Promise<string[]> {
-  const removed: string[] = [];
+export interface CleanupResult {
+  removed: CleanupEntry[];
+  kept: CleanupEntry[];
+}
+
+/** Keep active/reviewable work indefinitely; expire only discardable or unreadable metadata. */
+export async function cleanupWorktrees(
+  dirs: string | string[],
+  { maxAgeMs = 24 * 3600_000, force = false }: { maxAgeMs?: number; force?: boolean } = {},
+): Promise<CleanupResult> {
+  const result: CleanupResult = { removed: [], kept: [] };
+  const seen = new Set<string>();
+  for (const repoRoot of await repoRoots(dirs)) {
+    const cleaned = await cleanupRepo(repoRoot, maxAgeMs, force, seen);
+    result.removed.push(...cleaned.removed);
+    result.kept.push(...cleaned.kept);
+  }
+  return result;
+}
+
+async function cleanupRepo(repoRoot: string, maxAgeMs: number, force: boolean, seen: Set<string>): Promise<CleanupResult> {
+  const result: CleanupResult = { removed: [], kept: [] };
   for (const b of await managedWorktrees(repoRoot)) {
-    if (maxAgeMs > 0) {
-      const st = await fs.stat(b.path).catch(() => undefined);
-      if (st && Date.now() - st.mtimeMs < maxAgeMs) continue;
+    const canonical = realOrResolved(b.path);
+    if (seen.has(canonical)) continue;
+    seen.add(canonical);
+    const meta = await readMeta(b.path).catch(() => undefined);
+    let state: LifecycleState | null = null;
+    let ageMs: number | null = null;
+    if (meta && typeof meta === "object") {
+      // A failed legacy diff check must never make potentially useful work disposable.
+      const hasChanges = meta.state === undefined
+        ? await changedFiles(meta).then((files) => files.length > 0).catch(() => true)
+        : false;
+      state = effectiveState(meta, hasChanges);
+      const age = worktreeAgeMs(meta);
+      if (Number.isFinite(age)) ageMs = age;
+    } else {
+      // Corrupt metadata still has a last-write time; missing metadata falls back to the directory.
+      const gitDir = await gitOk(["rev-parse", "--absolute-git-dir"], b.path).catch(() => undefined);
+      const st = (gitDir ? await fs.stat(path.join(gitDir, META_FILE)).catch(() => undefined) : undefined)
+        ?? await fs.stat(b.path).catch(() => undefined);
+      if (st) ageMs = Date.now() - st.mtimeMs;
     }
-    await removeWorktree({ repoRoot, path: b.path, branch: b.branch });
-    removed.push(b.path);
+    const entry = { ...b, state, ageMs };
+    if (force || ((state === "discardable" || state === null) && ageMs !== null && ageMs > maxAgeMs)) {
+      await removeWorktree({ repoRoot, ...b });
+      result.removed.push(entry);
+    } else {
+      result.kept.push(entry);
+    }
   }
   // Orphan mp/* branches without a worktree.
   const branches = (await git(["for-each-ref", "--format=%(refname:short)", "refs/heads/mp/"], repoRoot)).stdout
@@ -423,7 +465,7 @@ async function cleanupRepo(repoRoot: string, maxAgeMs: number): Promise<string[]
     .filter(Boolean);
   const live = new Set((await git(["worktree", "list", "--porcelain"], repoRoot)).stdout.match(/refs\/heads\/mp\/\S+/g) ?? []);
   for (const br of branches) {
-    if (!live.has(`refs/heads/${br}`) && maxAgeMs === 0) await git(["branch", "-D", br], repoRoot);
+    if (!live.has(`refs/heads/${br}`) && (force || maxAgeMs === 0)) await git(["branch", "-D", br], repoRoot);
   }
-  return removed;
+  return result;
 }

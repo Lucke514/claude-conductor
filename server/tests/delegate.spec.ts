@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { delegate } from "../src/delegate.js";
@@ -189,8 +189,8 @@ describe("delegate (integration with fake CLIs)", () => {
     expect(existsSync(r.worktreePath!)).toBe(true);
     // git lists canonical paths (macOS /private/var, Windows long names with "/").
     const real = realpathSync.native(r.worktreePath!);
-    const removed = await cleanupWorktrees(repo);
-    expect(removed.map((p) => path.resolve(p))).toContain(path.resolve(real));
+    const { removed } = await cleanupWorktrees(repo, { force: true });
+    expect(removed.map((p) => path.resolve(p.path))).toContain(path.resolve(real));
     expect(git(repo, "branch", "--list", "mp/*")).toBe("");
   });
 
@@ -477,7 +477,7 @@ describe("nested-repos: delegate with repo", () => {
     const dirs = knownRepoDirs(root, [...state.repos!, outside, path.join(root, "gone")]);
     expect(dirs).toHaveLength(2);
     expect((await listWorktrees(dirs)).map((m) => m.sdd)).toEqual([{ slug: "demo", taskId: "T3" }]);
-    expect((await cleanupWorktrees(dirs)).map((p) => path.basename(p))).toEqual([path.basename(r.worktreePath!)]);
+    expect((await cleanupWorktrees(dirs, { force: true })).removed.map((p) => path.basename(p.path))).toEqual([path.basename(r.worktreePath!)]);
     expect(existsSync(r.worktreePath!)).toBe(false);
     expect(git(nested, "branch", "--list", "mp/*")).toBe("");
   });
@@ -712,5 +712,62 @@ describe("delegation-lifecycle metadata", () => {
     } finally {
       await removeWorktree(meta);
     }
+  });
+});
+
+describe("delegation-lifecycle cleanup", () => {
+  it("preserves protected states regardless of age and expires only old disposable work", async () => {
+    const repo = makeRepo();
+    const old = new Date(Date.now() - 72 * 3600_000).toISOString();
+    const states = ["running", "verifying", "awaiting_review", "recoverable", "discardable"] as const;
+    for (const state of states) {
+      const meta = await createWorktree({ cwd: repo, provider: "codex", includeUncommitted: false, symlink: [] });
+      writeFileSync(path.join(git(meta.path, "rev-parse", "--absolute-git-dir"), "mp-meta.json"),
+        JSON.stringify({ ...meta, state, updatedAt: old }));
+    }
+    const recent = await createWorktree({ cwd: repo, provider: "codex", includeUncommitted: false, symlink: [] });
+    writeFileSync(path.join(git(recent.path, "rev-parse", "--absolute-git-dir"), "mp-meta.json"),
+      JSON.stringify({ ...recent, state: "discardable", createdAt: old }));
+    utimesSync(recent.path, new Date(0), new Date(0));
+    git(repo, "branch", "mp/orphan");
+    const result = await cleanupWorktrees([repo, repo]);
+    expect(result.removed).toEqual([expect.objectContaining({ state: "discardable", ageMs: expect.any(Number) })]);
+    expect(result.removed[0]!.ageMs).toBeGreaterThan(24 * 3600_000);
+    expect(result.kept.map((e) => e.state).sort()).toEqual([...states].sort());
+    expect(existsSync(recent.path)).toBe(true);
+    expect(git(repo, "branch", "--list", "mp/orphan")).toContain("mp/orphan");
+    const forced = await cleanupWorktrees(repo, { force: true, maxAgeMs: Number.MAX_SAFE_INTEGER });
+    expect(forced.removed).toHaveLength(5);
+    expect(forced.kept).toEqual([]);
+    expect(git(repo, "branch", "--list", "mp/*")).toBe("");
+  });
+
+  it("classifies legacy changes and uses corrupt metadata mtime or missing metadata directory age", async () => {
+    const repo = makeRepo();
+    const old = new Date(Date.now() - 72 * 3600_000);
+    for (const kind of ["legacy-clean", "legacy-dirty", "corrupt-old", "corrupt-new", "missing"]) {
+      const meta = await createWorktree({ cwd: repo, provider: "codex", includeUncommitted: false, symlink: [] });
+      const file = path.join(git(meta.path, "rev-parse", "--absolute-git-dir"), "mp-meta.json");
+      if (kind.startsWith("legacy")) {
+        const { state, updatedAt, ...legacy } = meta;
+        writeFileSync(file, JSON.stringify({ ...legacy, createdAt: old.toISOString() }));
+        if (kind === "legacy-dirty") writeFileSync(path.join(meta.path, "pending.txt"), "keep");
+      } else if (kind === "missing") {
+        unlinkSync(file);
+        utimesSync(meta.path, old, old);
+      } else {
+        writeFileSync(file, "{broken");
+        if (kind === "corrupt-old") utimesSync(file, old, old);
+        else utimesSync(meta.path, old, old);
+      }
+    }
+    const result = await cleanupWorktrees(repo);
+    expect(result.removed.map((e) => e.state).sort()).toEqual(["discardable", null, null].sort());
+    expect(result.kept.map((e) => e.state).sort()).toEqual(["awaiting_review", null].sort());
+    git(repo, "branch", "mp/orphan");
+    const immediate = await cleanupWorktrees(repo, { maxAgeMs: 0 });
+    expect(immediate.kept.map((e) => e.state)).toEqual(["awaiting_review"]);
+    expect(git(repo, "branch", "--list", "mp/orphan")).toBe("");
+    await cleanupWorktrees(repo, { force: true });
   });
 });

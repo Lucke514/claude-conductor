@@ -6,7 +6,7 @@ import { AUTO_DELEGATE_CONTEXT, extractDelegateResult, postDelegate, preBash, pr
 import { applySettings, installGitHooks, setAutoDelegate, statuslineCommand, setStatuslineMode, uninstallGitHooks } from "../src/setup.js";
 import { FAKE_AGY, FAKE_CODEX, makeRepo, makeWorkspace, tmpDir } from "./helpers.js";
 import { StateStore } from "../src/state.js";
-import { createWorktree } from "../src/worktree.js";
+import { createWorktree, removeWorktree } from "../src/worktree.js";
 import { utimesSync } from "node:fs";
 import { worktreesDir } from "../src/paths.js";
 
@@ -258,6 +258,11 @@ describe("nested-repos R11/E5: SessionStart", () => {
     const meta = await createWorktree({ cwd: nested, provider: "codex", includeUncommitted: false, symlink: [] });
     const old = new Date(Date.now() - 25 * 3600_000);
     utimesSync(meta.path, old, old);
+    const metaFile = path.join(git(meta.path, "rev-parse", "--absolute-git-dir"), "mp-meta.json");
+    writeFileSync(metaFile, JSON.stringify({ ...meta, state: "discardable", updatedAt: old.toISOString() }));
+    const pending = await createWorktree({ cwd: nested, provider: "codex", includeUncommitted: false, symlink: [] });
+    writeFileSync(path.join(git(pending.path, "rev-parse", "--absolute-git-dir"), "mp-meta.json"),
+      JSON.stringify({ ...pending, state: "awaiting_review", updatedAt: new Date(Date.now() - 72 * 3600_000).toISOString() }));
     const prev = process.env.CLAUDE_PROJECT_DIR;
     process.env.CLAUDE_PROJECT_DIR = root;
     try {
@@ -267,6 +272,8 @@ describe("nested-repos R11/E5: SessionStart", () => {
       else process.env.CLAUDE_PROJECT_DIR = prev;
     }
     expect(existsSync(meta.path)).toBe(false);
+    expect(existsSync(pending.path)).toBe(true);
+    await removeWorktree(pending);
     expect((await store.read()).repos).toEqual([nested]);
   });
 });

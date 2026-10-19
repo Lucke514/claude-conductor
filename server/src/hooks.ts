@@ -251,14 +251,14 @@ export async function sessionStart(input: HookInput): Promise<HookOutput> {
   } catch (err) {
     return { systemMessage: `multi-provider: invalid configuration — ${(err as Error).message}` };
   }
-  // Housekeeping: drop delegation worktrees older than 24h, also in the nested repos (E5: forget the ones gone).
+  // Housekeeping: drop discardable delegation worktrees older than 24h, also in the nested repos (E5: forget the ones gone).
   const store = new StateStore();
   const state = await store
     .update((s) => {
       if (s.repos) s.repos = s.repos.filter((r) => existsSync(r));
     })
     .catch(() => undefined);
-  await cleanupWorktrees(knownRepoDirs(dir, state?.repos), 24 * 3600_000).catch(() => undefined);
+  await cleanupWorktrees(knownRepoDirs(dir, state?.repos), { maxAgeMs: 24 * 3600_000 }).catch(() => undefined);
   const statuses = await checkHealth(config, store).catch(() => []);
   if (statuses.some((s) => s.available)) return undefined;
   const detail = statuses

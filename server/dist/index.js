@@ -156,13 +156,13 @@ export function createServer() {
     });
     server.registerTool("delegation_cleanup", {
         title: "Clean up stale delegations",
-        description: "Remove leftover mp/* worktrees and branches of the current repository and of the nested repos delegations have used.",
-        inputSchema: { olderThanMinutes: z.number().int().nonnegative().optional() },
-    }, async ({ olderThanMinutes }) => {
+        description: "Remove discardable or unreadable mp/* worktrees older than 24 hours by default, including registered nested repos. Keeps running, verifying, awaiting_review and recoverable worktrees indefinitely. force=true removes all managed worktrees and orphan mp/* branches regardless of state or age.",
+        inputSchema: { olderThanMinutes: z.number().int().nonnegative().optional(), force: z.boolean().optional() },
+    }, async ({ olderThanMinutes, force }) => {
         try {
             const dir = projectDir();
-            const removed = await cleanupWorktrees(knownRepoDirs(dir, (await store.read()).repos), (olderThanMinutes ?? 0) * 60_000);
-            return json({ removed });
+            const result = await cleanupWorktrees(knownRepoDirs(dir, (await store.read()).repos), { maxAgeMs: (olderThanMinutes ?? 1440) * 60_000, force });
+            return json({ ...result, force: force ?? false });
         }
         catch (err) {
             return fail(err);
