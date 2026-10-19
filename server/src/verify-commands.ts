@@ -31,7 +31,8 @@ export function splitCommand(cmd: string): string[] {
     const c = cmd[i]!;
     if (quote) {
       if (c === quote) quote = null;
-      else if (c === "\\" && quote === '"' && i + 1 < cmd.length) cur += cmd[++i];
+      // As in sh, a backslash inside double quotes escapes only " \ $ and `; a Windows path keeps its backslashes.
+      else if (c === "\\" && quote === '"' && i + 1 < cmd.length && '"\\$`'.includes(cmd[i + 1]!)) cur += cmd[++i];
       else cur += c;
     } else if (c === '"' || c === "'") {
       quote = c;

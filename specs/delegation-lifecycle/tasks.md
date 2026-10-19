@@ -197,7 +197,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 
 ## Gaps found in verification
 
-- Ninguno todavía.
+- [x] **G1** — CI en Windows (Node 20 y 22): `splitCommand` trataba toda `\` dentro de comillas dobles como escape, así que `node "C:\…\sleep.mjs"` llegaba como `C:…sleep.mjs` y el comando moría al instante (los tests R4 de `sdd-verify` y `sdd-task-delegation`). Bug anterior a esta feature (venía de `hooks.ts`), visible ahora por los tests con rutas absolutas. Arreglo: como en sh, `\` entre comillas dobles solo escapa `" \ $ \``; test nuevo en `hooks-setup.spec.ts`. La espera del archivo de PID en `sdd-verify.spec.ts` pasa de 2 s a 6 s, como en el otro test.
 
 ## Verification reports
 

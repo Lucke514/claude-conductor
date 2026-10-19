@@ -113,7 +113,7 @@ describe("sdd verification", () => {
       ? runVerify(dir, testConfig({ verify: { commands: [command, next] } }), controller.signal, onCommand).then(r => r.items)
       : verifyTask(dir, task([command]), [gate("Tests", next, "exit 0")], 30000, {}, { signal: controller.signal, onCommand });
     try {
-      for (let i = 0; i < 100 && !existsSync(pidFile); i++) await new Promise(r => setTimeout(r, 20));
+      for (let i = 0; i < 120 && !existsSync(pidFile); i++) await new Promise(r => setTimeout(r, 50));
       expect(existsSync(pidFile)).toBe(true);
       const start = Date.now();
       controller.abort();

@@ -161,6 +161,8 @@ describe("PostToolUse(delegate)", () => {
 
   it("splitCommand honours quotes", () => {
     expect(splitCommand(`npm run lint -- --fix "a b" 'c d' ""`)).toEqual(["npm", "run", "lint", "--", "--fix", "a b", "c d", ""]);
+    // A Windows path in double quotes keeps its backslashes; \" and \\ are still escapes.
+    expect(splitCommand(String.raw`node "C:\Users\runner\sleep.mjs" "say \"hi\"" "a\\b"`)).toEqual(["node", String.raw`C:\Users\runner\sleep.mjs`, 'say "hi"', String.raw`a\b`]);
   });
 });
 
