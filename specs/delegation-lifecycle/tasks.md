@@ -115,9 +115,9 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 ## T5 — Verificación dentro del job, cancelable
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: codex (multi-provider) since 2026-10-19
 - **Component**: C4 · **Implements**: R4, E3, E2
-- **Files**: `server/src/jobs.ts`, `server/src/delegate.ts`, `server/src/verify-commands.ts`, `server/src/hooks.ts`, `server/src/sdd/verify.ts`, `server/src/sdd/task-delegation.ts`, `server/src/index.ts`, `hooks/hooks.json`, `hooks/conductor/model.ts`, `hooks/conductor/card.tsx`, `types/index.d.ts`, `server/tests/jobs.spec.ts`, `server/tests/delegate.spec.ts`, `server/tests/hooks-setup.spec.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/card-model.spec.ts`
+- **Files**: `server/src/jobs.ts`, `server/src/delegate.ts`, `server/src/verify-commands.ts`, `server/src/hooks.ts`, `server/src/sdd/verify.ts`, `server/src/sdd/task-delegation.ts`, `server/src/index.ts`, `hooks/hooks.json`, `hooks/conductor/model.ts`, `hooks/conductor/card.tsx`, `types/index.d.ts`, `server/tests/jobs.spec.ts`, `server/tests/delegate.spec.ts`, `server/tests/hooks-setup.spec.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/card-model.spec.ts`, `server/tests/fixtures/sleep.mjs`, `server/tests/sdd-verify.spec.ts`
 - **Do**:
   - `JobPhase` agrega `verifying`. `JobRegistry.setPhase(id, phase, detail?)` guarda el comando en curso (recortado con `progressLine`) y lo refleja en `state.json`.
   - `runVerify` se mueve de `hooks.ts` a `server/src/verify-commands.ts` y acepta un `signal`, que pasa a `runProcess`. Con el signal abortado, no ejecuta los comandos siguientes.
