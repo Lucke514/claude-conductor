@@ -8,6 +8,7 @@ export const statePath = () => path.join(mpHome(), "state.json");
 export const logsDir = () => path.join(mpHome(), "logs");
 export const patchesDir = () => path.join(mpHome(), "patches");
 export const worktreesDir = () => path.join(mpHome(), "worktrees");
+export const locksDir = () => path.join(mpHome(), "locks");
 /** User-level config (overrides the project one). Overridable via MP_USER_CONFIG. */
 export function userConfigPath() {
     return process.env.MP_USER_CONFIG ?? path.join(os.homedir(), ".claude", "multiprovider.json");

@@ -3,10 +3,13 @@ import path from "node:path";
 import { loadConfig, type MpConfig } from "./config.js";
 import { scrubCommand } from "./gh-scrub.js";
 import { checkHealth } from "./health.js";
-import { runProcess } from "./process.js";
+import { runVerify, type VerifyOutcome } from "./verify-commands.js";
+import { refreshPending } from "./pending.js";
 import { knownRepoDirs } from "./repo.js";
 import { StateStore } from "./state.js";
 import { assertManagedPath, cleanupWorktrees } from "./worktree.js";
+
+export { splitCommand, runVerify } from "./verify-commands.js";
 
 /**
  * Claude Code hook handlers. Each takes the hook's stdin JSON and returns the
@@ -104,66 +107,7 @@ export function extractDelegateResult(resp: unknown, depth = 0): Record<string, 
   return undefined;
 }
 
-/** Split "npm run lint -- --fix" into argv, honouring simple quotes. No shell involved. */
-export function splitCommand(cmd: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let quote: '"' | "'" | null = null;
-  let has = false;
-  for (let i = 0; i < cmd.length; i++) {
-    const c = cmd[i]!;
-    if (quote) {
-      if (c === quote) quote = null;
-      else if (c === "\\" && quote === '"' && i + 1 < cmd.length) cur += cmd[++i];
-      else cur += c;
-    } else if (c === '"' || c === "'") {
-      quote = c;
-      has = true;
-    } else if (/\s/.test(c)) {
-      if (has || cur) out.push(cur);
-      cur = "";
-      has = false;
-    } else {
-      cur += c;
-    }
-  }
-  if (has || cur) out.push(cur);
-  return out;
-}
-
-export interface VerifyResult {
-  command: string;
-  exitCode: number | null;
-  ok: boolean;
-  durationMs: number;
-  outputTail: string;
-}
-
-export async function runVerify(worktreePath: string, config: MpConfig): Promise<VerifyResult[]> {
-  const results: VerifyResult[] = [];
-  for (const c of config.verify.commands) {
-    const argv = Array.isArray(c) ? c : splitCommand(c);
-    if (argv.length === 0) continue;
-    const r = await runProcess({
-      command: argv[0]!,
-      args: argv.slice(1),
-      cwd: worktreePath,
-      timeoutMs: config.verify.timeoutMs,
-      env: { CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" },
-    });
-    const text = `${r.stdout}\n${r.stderr}`.trim();
-    results.push({
-      command: argv.join(" "),
-      exitCode: r.exitCode,
-      ok: r.exitCode === 0 && !r.timedOut,
-      durationMs: r.durationMs,
-      outputTail: (r.spawnError ? r.spawnError.message : r.timedOut ? `timed out after ${config.verify.timeoutMs}ms\n${text}` : text).slice(-1500),
-    });
-  }
-  return results;
-}
-
-/** PostToolUse(delegate): when there is a diff, run verify.commands inside the worktree. */
+/** PostToolUse(delegate): report job verification; run commands only for older servers. */
 export async function postDelegate(input: HookInput): Promise<HookOutput> {
   const res = extractDelegateResult(input.tool_response);
   const wt = res?.worktreePath;
@@ -173,8 +117,9 @@ export async function postDelegate(input: HookInput): Promise<HookOutput> {
   } catch {
     return undefined;
   }
-  const config = await safeConfig(projectDirFrom(input));
-  if (!config || config.verify.commands.length === 0) {
+  const supplied = res.verification as VerifyOutcome | undefined;
+  const config = supplied ? undefined : await safeConfig(projectDirFrom(input));
+  if (supplied?.result === "none" || (!supplied && (!config || config.verify.commands.length === 0))) {
     return {
       hookSpecificOutput: {
         hookEventName: "PostToolUse",
@@ -182,11 +127,12 @@ export async function postDelegate(input: HookInput): Promise<HookOutput> {
       },
     };
   }
-  const results = await runVerify(wt, config);
-  const allOk = results.every((r) => r.ok);
+  const outcome = supplied ?? await runVerify(wt, config!);
+  const results = outcome.items;
+  const allOk = outcome.result === "pass";
   const lines = results.map(
-    (r) => `- \`${r.command}\` → ${r.ok ? "OK" : `FAILED (exit ${r.exitCode ?? "none"})`} in ${Math.round(r.durationMs / 1000)}s` +
-      (r.ok ? "" : `\n\`\`\`\n${r.outputTail}\n\`\`\``),
+    (r) => `- \`${r.command}\` → ${r.result === "pass" ? "OK" : r.result === "manual" ? "MANUAL" : r.result === "cancelled" ? "CANCELLED" : `FAILED (exit ${r.exitCode ?? "none"})`} in ${Math.round((r.durationMs ?? 0) / 1000)}s` +
+      (r.result === "pass" ? "" : `\n\`\`\`\n${r.outputTail ?? r.reason ?? ""}\n\`\`\``),
   );
   return {
     hookSpecificOutput: {
@@ -251,14 +197,15 @@ export async function sessionStart(input: HookInput): Promise<HookOutput> {
   } catch (err) {
     return { systemMessage: `multi-provider: invalid configuration — ${(err as Error).message}` };
   }
-  // Housekeeping: drop delegation worktrees older than 24h, also in the nested repos (E5: forget the ones gone).
+  // Housekeeping: drop discardable delegation worktrees older than 24h, also in the nested repos (E5: forget the ones gone).
   const store = new StateStore();
   const state = await store
     .update((s) => {
       if (s.repos) s.repos = s.repos.filter((r) => existsSync(r));
     })
     .catch(() => undefined);
-  await cleanupWorktrees(knownRepoDirs(dir, state?.repos), 24 * 3600_000).catch(() => undefined);
+  await cleanupWorktrees(knownRepoDirs(dir, state?.repos), { maxAgeMs: 24 * 3600_000 }).catch(() => undefined);
+  await refreshPending(store, knownRepoDirs(dir, state?.repos));
   const statuses = await checkHealth(config, store).catch(() => []);
   if (statuses.some((s) => s.available)) return undefined;
   const detail = statuses

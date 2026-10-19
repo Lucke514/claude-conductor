@@ -43,7 +43,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs\" cli hook post-delegate",
-            "timeout": 900
+            "timeout": 30
           }
         ]
       }

@@ -385,7 +385,7 @@ async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pa
         <Box flexDirection="row" justifyContent="space-between">
           <Text color={STRONG} bold>{p.short}</Text>
           {isRunning && view.running ? (
-            <Text color={PALETTE.brass}>{`${view.running.spinner} tocando · ${view.running.mode} · ${view.running.elapsed}`}</Text>
+            <Text color={PALETTE.brass}>{`${view.running.spinner} ${view.running.phase === 'verifying' ? `verificando · ${view.running.detail ?? '…'}` : `tocando · ${view.running.mode}`} · ${view.running.elapsed}`}</Text>
           ) : (
             <Text color={color(p.tone)}>{p.badge}</Text>
           )}
@@ -456,6 +456,7 @@ async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pa
           <Text color={color(r.tone)}>{` ${r.outcome}`}</Text>
         </Text>
       ))}
+      {view.pending ? <Text color={color(view.pending.tone)}>{view.pending.text}</Text> : ''}
     </Box>
   ) : null
 
@@ -476,7 +477,7 @@ async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pa
           plain
           hotkey="3"
           label="limpiar worktrees"
-          onPress={() => void $.prompt.submit({ text: 'Usa la herramienta delegation_cleanup de multi-provider para limpiar los worktrees mp/* huérfanos.' })}
+          onPress={() => void $.prompt.submit({ text: 'Usa la herramienta delegation_cleanup de multi-provider para limpiar los worktrees mp/* descartables (conserva los diffs pendientes de revisión).' })}
         />
         <Button key="doctor" plain hotkey="4" label="/mp-doctor" onPress={run('multi-provider:mp-doctor')} />
         <Button key="clean" plain hotkey="5" label="clean-terminal" onPress={() => void cleanTerminal($)} />

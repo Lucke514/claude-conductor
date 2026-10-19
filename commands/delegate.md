@@ -14,6 +14,6 @@ Raw arguments: `$ARGUMENTS`
    - auto → call the `delegate` MCP tool with `provider: "auto"` yourself, then verify like the worker agents do.
 4. Handle the result (report `provider`, the one that answered; if it differs from `requestedProvider`, say so):
    - `fallback_to_claude` → explain briefly why (from `summary`) and do the task yourself.
-   - Write mode with a diff and an **ACCEPT** verdict → show the user the diff summary and verification results, and only after their OK call `delegation_apply` with the `worktreePath`, then commit yourself with the user's git identity (no co-author/attribution lines).
+   - Write mode with a diff and an **ACCEPT** verdict → show the user the diff summary and verification results, and only after their OK call `delegation_apply` with `worktreePath` and `expectedPatchSha256` (from the worker report or delegate response). If it returns `PATCH_CHANGED`, re-verify the diff before applying. If it returns `conflicts`, report them to the user (they can choose to apply with `allowConflicts: true` or resolve by hand). Then commit yourself with the user's git identity (no co-author/attribution lines).
    - REQUEST_CHANGES / DISCARD → explain, and either fix it yourself, re-delegate, or call `delegation_discard`.
 5. Never merge `mp/*` branches and never accept output you have not verified.

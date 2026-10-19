@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { logsDir } from "./paths.js";
+import type { LifecycleState } from "./worktree.js";
 import { today } from "./state.js";
 
 /**
@@ -27,7 +28,35 @@ export interface AuditEntry {
   sdd?: { slug: string; taskId: string };
 }
 
-export async function appendAudit(entry: AuditEntry, dir = logsDir()): Promise<void> {
+export interface LifecycleAuditEntry {
+  type: "lifecycle";
+  id: string;
+  ts: string;
+  from: LifecycleState | null;
+  to: LifecycleState;
+}
+
+/** A `sdd_task_delegate` refused because another delegation holds the task (R7, R8). */
+export interface ReservationAuditEntry {
+  type: "TASK_IN_FLIGHT";
+  id: string;
+  callerId: string;
+  heldBy: string;
+  ts: string;
+  sdd: { slug: string; taskId: string };
+}
+
+/** A `delegation_apply` refused because the worktree diff changed (R5, R8). */
+export interface PatchChangedAuditEntry {
+  type: "PATCH_CHANGED";
+  id: string;
+  ts: string;
+}
+
+export async function appendAudit(
+  entry: AuditEntry | LifecycleAuditEntry | ReservationAuditEntry | PatchChangedAuditEntry,
+  dir = logsDir(),
+): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
   await fs.appendFile(path.join(dir, `${today()}.jsonl`), `${JSON.stringify(entry)}\n`, { encoding: "utf8", mode: 0o600 });
 }

@@ -4,7 +4,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { loadConfig } from "./config.js";
+import { runVerify } from "./verify-commands.js";
 import { delegate } from "./delegate.js";
+import { refreshPending } from "./pending.js";
 import { knownRepoDirs, RepoError } from "./repo.js";
 import { SddError } from "./sdd/artifacts.js";
 import { sddFeatureStatus } from "./sdd/pipeline.js";
@@ -13,7 +15,7 @@ import { checkHealth } from "./health.js";
 import { JobRegistry } from "./jobs.js";
 import { StateStore } from "./state.js";
 import { applyWorktree, cleanupWorktrees, readMeta, removeWorktree } from "./worktree.js";
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 export function projectDir() {
     const env = process.env.MP_PROJECT_DIR ?? process.env.CLAUDE_PROJECT_DIR;
     // Guard against an unexpanded "${CLAUDE_PROJECT_DIR}" placeholder.
@@ -34,7 +36,9 @@ export function createServer() {
     const store = new StateStore();
     const jobs = new JobRegistry(store);
     // E5: jobs a previous server left running in state.json are marked lost.
-    void jobs.reconcile();
+    const reconciled = jobs.reconcile();
+    // delegation-lifecycle: the card's count of diffs awaiting review, after anything that changes it.
+    const pending = async () => refreshPending(store, knownRepoDirs(projectDir(), (await store.read().catch(() => undefined))?.repos));
     const server = new McpServer({ name: "multi-provider", version: VERSION });
     server.registerTool("delegate", {
         title: "Delegate a task to another AI CLI",
@@ -63,7 +67,9 @@ export function createServer() {
         try {
             const dir = projectDir();
             const { config } = await loadConfig(dir);
-            return json(await delegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs }));
+            const r = await delegate({ ...args, verify: (wt, signal, onCommand) => runVerify(wt, config, signal, onCommand) }, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs });
+            await pending();
+            return json(r);
         }
         catch (err) {
             return fail(err);
@@ -100,12 +106,20 @@ export function createServer() {
     server.registerTool("delegation_apply", {
         title: "Apply a delegated diff",
         description: "Apply the current changes of a delegation worktree to the user's checkout with `git apply --3way` (no commit), " +
-            "then delete the worktree and its mp/* branch. Only call after reviewing and verifying the diff. You commit afterwards.",
-        inputSchema: { worktreePath: z.string().min(1) },
-    }, async ({ worktreePath }) => {
+            "then delete the worktree and its mp/* branch. Only call after reviewing and verifying the diff. You commit afterwards. " +
+            "Pass expectedPatchSha256 to ensure applying only what was reviewed (fails with PATCH_CHANGED if changed). " +
+            "If conflicts occur, checkout stays untouched unless allowConflicts: true is passed.",
+        inputSchema: {
+            worktreePath: z.string().min(1).describe("Worktree path to apply"),
+            expectedPatchSha256: z.string().optional().describe("SHA-256 of the reviewed patch. If the diff changed, returns PATCH_CHANGED and applies nothing"),
+            allowConflicts: z.boolean().optional().describe("Apply with 3-way conflict markers if the patch does not apply cleanly (lists conflicted files)"),
+        },
+    }, async ({ worktreePath, expectedPatchSha256, allowConflicts }) => {
         try {
             const id = `${Date.now()}-${randomBytes(3).toString("hex")}`;
-            return json(await applyWorktree(worktreePath, id));
+            const r = await applyWorktree(worktreePath, id, { expectedPatchSha256, allowConflicts });
+            await pending();
+            return json(r);
         }
         catch (err) {
             return fail(err);
@@ -119,6 +133,7 @@ export function createServer() {
         try {
             const meta = await readMeta(worktreePath);
             await removeWorktree(meta);
+            await pending();
             return json({ discarded: true, worktreePath, branch: meta.branch });
         }
         catch (err) {
@@ -128,12 +143,13 @@ export function createServer() {
     server.registerTool("delegation_status", {
         title: "Delegations in progress",
         annotations: { readOnlyHint: true, openWorldHint: false },
-        description: "Read-only. The delegations this server is running (or one by id): provider, mode, phase, elapsed time, the worker's last progress lines " +
+        description: "Read-only. The delegations this server is running (or one by id): provider, mode, phase, current verification command (detail), elapsed time, the worker's last progress lines " +
             "(its own output, trimmed; never the prompt) and files changed so far. Also lists jobs lost when a previous server stopped (phase: lost). " +
             "Use it while a long delegate / sdd_task_delegate call runs in the background.",
         inputSchema: { id: z.string().min(1).optional().describe("Delegation id; omit for all") },
     }, async ({ id }) => {
         try {
+            await reconciled;
             const lost = ((await store.read()).jobs ?? []).filter((j) => j.phase === "lost" && (!id || j.id === id));
             return json({ jobs: await jobs.status(id), ...(lost.length ? { lost } : {}) });
         }
@@ -143,8 +159,8 @@ export function createServer() {
     });
     server.registerTool("delegation_cancel", {
         title: "Cancel a delegation",
-        description: "Stops a running delegation: kills the worker's process tree, tries no other provider and leaves the circuit breaker alone. " +
-            "Changes the worker already made stay in its worktree (the delegate call returns status cancelled with the diff).",
+        description: "Stops a running delegation: kills the worker or current verification process tree, skips remaining commands, tries no other provider and leaves the circuit breaker alone. " +
+            "Worker cancellation returns status cancelled with its diff. Verification cancellation leaves the worktree awaiting_review with verification.result cancelled.",
         inputSchema: { id: z.string().min(1).describe("Delegation id (from delegation_status)") },
     }, async ({ id }) => {
         try {
@@ -156,13 +172,14 @@ export function createServer() {
     });
     server.registerTool("delegation_cleanup", {
         title: "Clean up stale delegations",
-        description: "Remove leftover mp/* worktrees and branches of the current repository and of the nested repos delegations have used.",
-        inputSchema: { olderThanMinutes: z.number().int().nonnegative().optional() },
-    }, async ({ olderThanMinutes }) => {
+        description: "Remove discardable or unreadable mp/* worktrees older than 24 hours by default, including registered nested repos. Keeps running, verifying, awaiting_review and recoverable worktrees indefinitely. force=true removes all managed worktrees and orphan mp/* branches regardless of state or age.",
+        inputSchema: { olderThanMinutes: z.number().int().nonnegative().optional(), force: z.boolean().optional() },
+    }, async ({ olderThanMinutes, force }) => {
         try {
             const dir = projectDir();
-            const removed = await cleanupWorktrees(knownRepoDirs(dir, (await store.read()).repos), (olderThanMinutes ?? 0) * 60_000);
-            return json({ removed });
+            const result = await cleanupWorktrees(knownRepoDirs(dir, (await store.read()).repos), { maxAgeMs: (olderThanMinutes ?? 1440) * 60_000, force });
+            await pending();
+            return json({ ...result, force: force ?? false });
         }
         catch (err) {
             return fail(err);
@@ -207,7 +224,9 @@ export function createServer() {
         try {
             const dir = projectDir();
             const { config } = await loadConfig(dir);
-            return json(await sddTaskDelegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs }));
+            const r = await sddTaskDelegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs });
+            await pending();
+            return json(r);
         }
         catch (err) {
             return fail(err);

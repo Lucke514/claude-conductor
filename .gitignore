@@ -7,3 +7,6 @@ coverage/
 # Written by Claude Code when it loads the plugin from a folder (API types for editors).
 .claude-plugin/types/
 /tsconfig.json
+
+# Backups de settings que escribe /mp-setup
+.claude/settings.json.bak-*

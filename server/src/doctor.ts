@@ -6,7 +6,8 @@ import { loadConfig, type MpConfig, type ProviderConfig } from "./config.js";
 import { checkHealth, makeAdapters, type ProviderStatus } from "./health.js";
 import { ptyAvailable, runProcess } from "./process.js";
 import { PROVIDER_NAMES, type ProviderAdapter, type ProviderName } from "./providers/types.js";
-import { workspaceRepos } from "./repo.js";
+import { PENDING_WARN_DAYS, pendingWorktrees } from "./pending.js";
+import { knownRepoDirs, workspaceRepos } from "./repo.js";
 import { scanSecrets } from "./secrets-scan.js";
 import { pluginRoot } from "./setup.js";
 import type { StateStore } from "./state.js";
@@ -121,6 +122,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
 
   checks.push(mcpConfigCheck(opts.pluginRoot ?? pluginRoot()));
   checks.push(...(await workspaceChecks(opts.projectDir, config)));
+  checks.push(await pendingCheck(knownRepoDirs(opts.projectDir, (await opts.store.read().catch(() => undefined))?.repos)));
 
   const agy = config.providers.antigravity;
   // stream-json (the default) runs without a PTY; only text/json need node-pty.
@@ -223,6 +225,21 @@ export async function workspaceChecks(projectDir: string, config: Pick<MpConfig,
     });
   }
   return checks;
+}
+
+/** delegation-lifecycle R1/Q1: diffs that cleanup never removes, with their age. */
+export async function pendingCheck(dirs: string | string[], now = Date.now()): Promise<DoctorCheck> {
+  const name = "pending worktrees";
+  const list = await pendingWorktrees(dirs, now).catch(() => []);
+  if (list.length === 0) return { name, level: "ok", detail: "none: no diff awaits review" };
+  const days = (ms: number) => Math.floor(ms / 86_400_000);
+  const old = list.filter((p) => days(p.ageMs) >= PENDING_WARN_DAYS);
+  return {
+    name,
+    level: old.length ? "warn" : "ok",
+    detail: list.map((p) => `${p.state} ${days(p.ageMs)}d ${p.path}`).join("; "),
+    ...(old.length ? { fix: "review each diff, then delegation_apply or delegation_discard it; delegation_cleanup { force: true } removes them all" } : {}),
+  };
 }
 
 /** E1: which transport codex will really use. */

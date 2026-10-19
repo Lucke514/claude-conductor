@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bar, buildCard, ctxBar, fmtClock, fmtCost, fmtDuration, fmtTokens, outcomeOf, ownerProvider, parseTasks, parseVerdict, pickActiveSpec, pipelineView, prettyModel, providerView, rateLimitText, rateLimitView, sparkline, specProgress } from "../../hooks/conductor/model.js";
+import { runningFromJobs, bar, buildCard, ctxBar, fmtClock, fmtCost, fmtDuration, fmtTokens, outcomeOf, ownerProvider, parseTasks, parseVerdict, pickActiveSpec, pipelineView, prettyModel, providerView, rateLimitText, rateLimitView, sparkline, specProgress } from "../../hooks/conductor/model.js";
 
 const NOW = Date.parse("2026-10-18T12:00:00Z");
 const TODAY = "2026-10-18";
@@ -66,6 +66,15 @@ describe("conductor card model", () => {
     expect(running.kind).toBe("running");
     expect(running.running).toMatchObject({ provider: "codex", elapsed: "00:42", spinner: "⠹" });
     expect(running.border).toBe("#E0A85A");
+  });
+
+  it("R4: verifying keeps the active card and exposes the command and clock", () => {
+    const state = { jobs: [{ id: "j", provider: "codex", mode: "write", task: "t",
+      phase: "verifying", detail: "npm test", startedAt: new Date(NOW - 42000).toISOString() }] };
+    const view = buildCard({ state, now: NOW, running: runningFromJobs(state) });
+    expect(view.kind).toBe("running");
+    expect(view.border).toBe("#E0A85A");
+    expect(view.running).toMatchObject({ phase: "verifying", detail: "npm test", elapsed: "00:42" });
   });
 
   it("strikes unavailable providers in the chain", () => {
@@ -224,5 +233,15 @@ describe("provider-reliability R7: honest health", () => {
     const v = providerView("antigravity", { health: { installed: true, enabled: true, auth: "ok" }, breaker: { consecutiveFailures: 0 }, metrics: { day: TODAY, callsToday: 1, lastNotice: { type: "STALLED", at: "2026-10-18T11:59:00Z" }, lastCallAt: "2026-10-18T11:59:00Z" } } as never, NOW, TODAY);
     expect(v.kind).toBe("ok");
     expect(v.detail).toContain("aviso STALLED");
+  });
+});
+
+describe("delegation-lifecycle: pending diffs on the card", () => {
+  it("shows nothing without pending diffs, a dim line under 7 days and a warning from 7 days on", () => {
+    const now = Date.parse("2026-10-19T12:00:00Z");
+    expect(buildCard({ state: {}, now }).pending).toBeUndefined();
+    expect(buildCard({ state: { pending: { count: 0, oldestDays: 0, at: "" } }, now }).pending).toBeUndefined();
+    expect(buildCard({ state: { pending: { count: 1, oldestDays: 2, at: "" } }, now }).pending).toEqual({ text: "1 diff pendiente de revisar o descartar", tone: "dim" });
+    expect(buildCard({ state: { pending: { count: 2, oldestDays: 9, at: "" } }, now }).pending).toEqual({ text: "⚠ 2 diffs pendientes · el más antiguo de hace 9 días", tone: "warn" });
   });
 });

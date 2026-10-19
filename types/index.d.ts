@@ -1,7 +1,7 @@
 // Contract of the values the conductor header keeps in $.state (self-contained:
 // mirrors the shapes in hooks/conductor/model.ts).
 
-export type Running = { provider: string; mode: string; task: string; startedAt: number; slug?: string; taskId?: string }
+export type Running = { phase?: string; detail?: string; provider: string; mode: string; task: string; startedAt: number; slug?: string; taskId?: string }
 export type SessionTally = { calls: number; tokens: number }
 export type SessionMeta = {
   model?: string
@@ -67,7 +67,8 @@ export type StateFile = {
   chain?: string[]
   providers?: { codex?: ProviderStateFile; antigravity?: ProviderStateFile }
   recent?: RecentFile[]
-  jobs?: { id: string; provider: string | null; mode: string; task: string; sdd?: { slug: string; taskId: string }; phase: string; startedAt: string; lastProgress?: string }[]
+  jobs?: { id: string; provider: string | null; mode: string; task: string; sdd?: { slug: string; taskId: string }; phase: string; detail?: string; startedAt: string; lastProgress?: string }[]
+  pending?: { count: number; oldestDays: number; at: string }
 }
 
 declare module 'claude-code' {

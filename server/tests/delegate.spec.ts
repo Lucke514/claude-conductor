@@ -1,13 +1,19 @@
+for (const k of Object.keys(process.env)) {
+  if (k.startsWith("GIT_CONFIG_")) delete process.env[k];
+}
+
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { runVerify } from "../src/verify-commands.js";
 import { delegate } from "../src/delegate.js";
 import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
 import { knownRepoDirs } from "../src/repo.js";
-import { applyWorktree, cleanupWorktrees, listWorktrees, readMeta, removeWorktree } from "../src/worktree.js";
-import type { ProviderAdapter, ProviderName } from "../src/providers/types.js";
+import { applyWorktree, cleanupWorktrees, createWorktree, effectiveState, listWorktrees, readMeta, removeWorktree, setMetaState, worktreeAgeMs } from "../src/worktree.js";
+import { ERROR_TYPES, type ProviderAdapter, type ProviderName } from "../src/providers/types.js";
 import { FAKE_CODEX, isAlive, makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
@@ -77,14 +83,79 @@ describe("delegate (integration with fake CLIs)", () => {
     expect(r.diff).toContain("+hello from worker");
     expect(r.filesChanged).toEqual(["added-by-worker.txt"]);
     expect(r.violations).toBeUndefined();
+    expect((await readMeta(r.worktreePath!)).state).toBe("awaiting_review");
     expect(existsSync(path.join(repo, "added-by-worker.txt"))).toBe(false);
 
-    const applied = await applyWorktree(r.worktreePath!, "t1");
+    expect(r.patchSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect((await readMeta(r.worktreePath!)).patchSha256).toBe(r.patchSha256);
+
+    const applied = await applyWorktree(r.worktreePath!, "t1", { expectedPatchSha256: r.patchSha256 });
     expect(applied.applied).toBe(true);
     expect(readFileSync(path.join(repo, "added-by-worker.txt"), "utf8")).toBe("hello from worker\n");
     expect(git(repo, "rev-parse", "HEAD")).toBe(headBefore); // nothing committed
     expect(git(repo, "branch", "--list", "mp/*")).toBe("");
     expect(existsSync(r.worktreePath!)).toBe(false);
+  });
+
+  it("SC2/R5: verify modifying files reports verify_modified_files, updates patchSha256; apply with worker hash returns PATCH_CHANGED; apply with final hash applies", async () => {
+    const repo = makeRepo();
+    process.env.FAKE_MODE = "write";
+    const c = ctx(repo);
+    let workerHash = "";
+    const r = await delegate(
+      {
+        provider: "codex",
+        task: "add a file",
+        mode: "write",
+        verify: async (wtPath) => {
+          // Capture worker diff before verification modifies the file
+          const workerPatch = execFileSync("git", ["diff", "HEAD", "added-by-worker.txt"], { cwd: wtPath, encoding: "utf8" });
+          workerHash = createHash("sha256").update(workerPatch).digest("hex");
+          // Verification (e.g. linter/formatter) modifies the file
+          writeFileSync(path.join(wtPath, "added-by-worker.txt"), "hello from worker formatted by verify\n");
+          return { result: "pass", items: [{ kind: "verify", command: "format", result: "pass" }] };
+        },
+      },
+      c,
+    );
+
+    expect(r.status).toBe("success");
+    expect(r.violations).toEqual([
+      expect.objectContaining({
+        type: "verify_modified_files",
+        files: ["added-by-worker.txt"],
+      }),
+    ]);
+    expect(r.diff).toContain("+hello from worker formatted by verify");
+    expect(r.patchSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(r.patchSha256).not.toBe(workerHash);
+
+    const meta = await readMeta(r.worktreePath!);
+    expect(meta.patchSha256).toBe(r.patchSha256);
+    expect(meta.verification?.modifiedFiles).toEqual(["added-by-worker.txt"]);
+
+    // Applying with the pre-verification worker hash returns PATCH_CHANGED and does not touch checkout
+    const statusBefore = git(repo, "status", "--porcelain");
+    const changed = await applyWorktree(r.worktreePath!, "sc2-wrong", { expectedPatchSha256: workerHash });
+    expect(changed.applied).toBe(false);
+    expect(changed.code).toBe("PATCH_CHANGED");
+    expect(changed.patchSha256).toBe(r.patchSha256);
+    expect(git(repo, "status", "--porcelain")).toBe(statusBefore);
+
+    // Applying with the final verified hash succeeds
+    const applied = await applyWorktree(r.worktreePath!, "sc2-ok", { expectedPatchSha256: r.patchSha256 });
+    expect(applied.applied).toBe(true);
+    expect(readFileSync(path.join(repo, "added-by-worker.txt"), "utf8")).toBe("hello from worker formatted by verify\n");
+  });
+
+  it("E3: shell syntax and unavailable commands are manual and await review", async () => {
+    process.env.FAKE_MODE = "write";
+    const c = ctx(makeRepo(), { verify: { commands: ["missing-verifier-binary-xyz", "npm test && echo done"] } });
+    const r = await delegate({ provider: "codex", task: "t", mode: "write",
+      verify: (wt, signal, onCommand) => runVerify(wt, c.config, signal, onCommand) }, c);
+    expect(r.verification?.items.map(i => i.result)).toEqual(["manual", "manual"]);
+    expect((await readMeta(r.worktreePath!)).state).toBe("awaiting_review");
+    await removeWorktree(await readMeta(r.worktreePath!));
   });
 
   it("worker commits are undone with reset --soft and reported as a violation", async () => {
@@ -189,8 +260,8 @@ describe("delegate (integration with fake CLIs)", () => {
     expect(existsSync(r.worktreePath!)).toBe(true);
     // git lists canonical paths (macOS /private/var, Windows long names with "/").
     const real = realpathSync.native(r.worktreePath!);
-    const removed = await cleanupWorktrees(repo);
-    expect(removed.map((p) => path.resolve(p))).toContain(path.resolve(real));
+    const { removed } = await cleanupWorktrees(repo, { force: true });
+    expect(removed.map((p) => path.resolve(p.path))).toContain(path.resolve(real));
     expect(git(repo, "branch", "--list", "mp/*")).toBe("");
   });
 
@@ -295,7 +366,7 @@ describe("provider-reliability R4/R5: idle timeout and partial results", () => {
     expect(r.attempts).toEqual([expect.objectContaining({ provider: "codex", errorType: "STALLED" })]);
     expect(r.diff).toContain("partial work");
     expect(r.patchFile && existsSync(r.patchFile)).toBe(true);
-    expect(r.nextSteps[0]).toContain("ran out of time");
+    expect(r.nextSteps[0]).toContain("failed (STALLED)");
     expect(git(repo, "branch", "--list", "mp/*").split("\n").filter(Boolean)).toHaveLength(1);
     expect((await c.store.read()).providers.codex?.breaker?.consecutiveFailures ?? 0).toBe(0);
     await removeWorktree(await readMeta(r.worktreePath!));
@@ -477,7 +548,7 @@ describe("nested-repos: delegate with repo", () => {
     const dirs = knownRepoDirs(root, [...state.repos!, outside, path.join(root, "gone")]);
     expect(dirs).toHaveLength(2);
     expect((await listWorktrees(dirs)).map((m) => m.sdd)).toEqual([{ slug: "demo", taskId: "T3" }]);
-    expect((await cleanupWorktrees(dirs)).map((p) => path.basename(p))).toEqual([path.basename(r.worktreePath!)]);
+    expect((await cleanupWorktrees(dirs, { force: true })).removed.map((p) => path.basename(p.path))).toEqual([path.basename(r.worktreePath!)]);
     expect(existsSync(r.worktreePath!)).toBe(false);
     expect(git(nested, "branch", "--list", "mp/*")).toBe("");
   });
@@ -661,5 +732,169 @@ describe("gitConfigEnv", () => {
     const hooks: [string, string][] = [["core.hooksPath", "/h"]];
     expect(gitConfigEnv(hooks, { GIT_CONFIG_COUNT: "3" })).toEqual({ GIT_CONFIG_COUNT: "4", GIT_CONFIG_KEY_3: "core.hooksPath", GIT_CONFIG_VALUE_3: "/h" });
     expect(gitConfigEnv(hooks, {})).toEqual({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: "/h" });
+  });
+});
+
+describe("delegation-lifecycle metadata", () => {
+  it("creates running metadata and persists audited transitions without content", async () => {
+    const meta = await createWorktree({ cwd: makeRepo(), provider: "codex", includeUncommitted: false, symlink: [], id: "lifecycle-test" });
+    try {
+      expect(await readMeta(meta.path)).toEqual(meta);
+      expect(meta.state).toBe("running");
+      expect(meta.updatedAt).toBe(meta.createdAt);
+      const before = Date.now();
+      const extra = { patchSha256: "a".repeat(64), verification: { result: "pass" as const, modifiedFiles: ["private-file.ts"] } };
+      const updated = await setMetaState(meta.path, "verifying", extra);
+      expect(Date.parse(updated.updatedAt!)).toBeGreaterThanOrEqual(before);
+      expect(updated).toMatchObject({ ...meta, ...extra, state: "verifying", updatedAt: expect.any(String) });
+      expect(await readMeta(meta.path)).toEqual(updated);
+      await setMetaState(meta.path, "awaiting_review");
+      const entries = readdirSync(logsDir()).flatMap((f) => readFileSync(path.join(logsDir(), f), "utf8").trim().split("\n").map((l) => JSON.parse(l)))
+        .filter((e) => e.id === "lifecycle-test");
+      expect(entries).toEqual([
+        { type: "lifecycle", id: meta.id, ts: updated.updatedAt, from: "running", to: "verifying" },
+        { type: "lifecycle", id: meta.id, ts: expect.any(String), from: "verifying", to: "awaiting_review" },
+      ]);
+    } finally {
+      await removeWorktree(meta);
+    }
+  });
+
+  it("resolves legacy states and honors every explicit state", () => {
+    expect(effectiveState({}, true)).toBe("awaiting_review");
+    expect(effectiveState({}, false)).toBe("discardable");
+    for (const state of ["running", "verifying", "awaiting_review", "recoverable", "discardable"] as const) {
+      expect(effectiveState({ state }, true)).toBe(state);
+      expect(effectiveState({ state }, false)).toBe(state);
+    }
+  });
+
+  it("uses updatedAt with a createdAt fallback regardless of directory mtime", async () => {
+    const meta = await createWorktree({ cwd: makeRepo(), provider: "codex", includeUncommitted: false, symlink: [] });
+    try {
+      const now = Date.parse(meta.createdAt) + 1000;
+      utimesSync(meta.path, new Date(0), new Date(0));
+      expect(worktreeAgeMs(await readMeta(meta.path), now)).toBe(1000);
+      expect(worktreeAgeMs({ createdAt: new Date(0).toISOString(), updatedAt: meta.updatedAt }, now)).toBe(1000);
+      expect(worktreeAgeMs({ createdAt: meta.createdAt }, now)).toBe(1000);
+      await expect(setMetaState(meta.path, "recoverable")).rejects.toThrow(/delegation id/);
+      expect(await readMeta(meta.path)).toEqual(meta);
+      expect((await setMetaState(meta.path, "recoverable", { id: "legacy-id" })).id).toBe("legacy-id");
+    } finally {
+      await removeWorktree(meta);
+    }
+  });
+});
+
+describe("delegation-lifecycle cleanup", () => {
+  it("preserves protected states regardless of age and expires only old disposable work", async () => {
+    const repo = makeRepo();
+    const old = new Date(Date.now() - 72 * 3600_000).toISOString();
+    const states = ["running", "verifying", "awaiting_review", "recoverable", "discardable"] as const;
+    for (const state of states) {
+      const meta = await createWorktree({ cwd: repo, provider: "codex", includeUncommitted: false, symlink: [] });
+      writeFileSync(path.join(git(meta.path, "rev-parse", "--absolute-git-dir"), "mp-meta.json"),
+        JSON.stringify({ ...meta, state, updatedAt: old }));
+    }
+    const recent = await createWorktree({ cwd: repo, provider: "codex", includeUncommitted: false, symlink: [] });
+    writeFileSync(path.join(git(recent.path, "rev-parse", "--absolute-git-dir"), "mp-meta.json"),
+      JSON.stringify({ ...recent, state: "discardable", createdAt: old }));
+    utimesSync(recent.path, new Date(0), new Date(0));
+    git(repo, "branch", "mp/orphan");
+    const result = await cleanupWorktrees([repo, repo]);
+    expect(result.removed).toEqual([expect.objectContaining({ state: "discardable", ageMs: expect.any(Number) })]);
+    expect(result.removed[0]!.ageMs).toBeGreaterThan(24 * 3600_000);
+    expect(result.kept.map((e) => e.state).sort()).toEqual([...states].sort());
+    expect(existsSync(recent.path)).toBe(true);
+    expect(git(repo, "branch", "--list", "mp/orphan")).toContain("mp/orphan");
+    const forced = await cleanupWorktrees(repo, { force: true, maxAgeMs: Number.MAX_SAFE_INTEGER });
+    expect(forced.removed).toHaveLength(5);
+    expect(forced.kept).toEqual([]);
+    expect(git(repo, "branch", "--list", "mp/*")).toBe("");
+  });
+
+  it("classifies legacy changes and uses corrupt metadata mtime or missing metadata directory age", async () => {
+    const repo = makeRepo();
+    const old = new Date(Date.now() - 72 * 3600_000);
+    for (const kind of ["legacy-clean", "legacy-dirty", "corrupt-old", "corrupt-new", "missing"]) {
+      const meta = await createWorktree({ cwd: repo, provider: "codex", includeUncommitted: false, symlink: [] });
+      const file = path.join(git(meta.path, "rev-parse", "--absolute-git-dir"), "mp-meta.json");
+      if (kind.startsWith("legacy")) {
+        const { state, updatedAt, ...legacy } = meta;
+        writeFileSync(file, JSON.stringify({ ...legacy, createdAt: old.toISOString() }));
+        if (kind === "legacy-dirty") writeFileSync(path.join(meta.path, "pending.txt"), "keep");
+      } else if (kind === "missing") {
+        unlinkSync(file);
+        utimesSync(meta.path, old, old);
+      } else {
+        writeFileSync(file, "{broken");
+        if (kind === "corrupt-old") utimesSync(file, old, old);
+        else utimesSync(meta.path, old, old);
+      }
+    }
+    const result = await cleanupWorktrees(repo);
+    expect(result.removed.map((e) => e.state).sort()).toEqual(["discardable", null, null].sort());
+    expect(result.kept.map((e) => e.state).sort()).toEqual(["awaiting_review", null].sort());
+    git(repo, "branch", "mp/orphan");
+    const immediate = await cleanupWorktrees(repo, { maxAgeMs: 0 });
+    expect(immediate.kept.map((e) => e.state)).toEqual(["awaiting_review"]);
+    expect(git(repo, "branch", "--list", "mp/orphan")).toBe("");
+    await cleanupWorktrees(repo, { force: true });
+  });
+});
+
+describe("delegation-lifecycle failed write fallback", () => {
+  it.each(ERROR_TYPES)("preserves changes after %s and never retries or starts another provider", async (errorType) => {
+    const repo = makeRepo();
+    const calls: ProviderName[] = [];
+    const make = (name: ProviderName): ProviderAdapter => ({
+      name,
+      isAvailable: async () => true,
+      healthCheck: async () => ({}) as never,
+      run: async ({ cwd }) => {
+        calls.push(name);
+        writeFileSync(path.join(cwd, "pending.txt"), "partial work\n");
+        return { ok: false, output: "", exitCode: 1, durationMs: 1, error: { type: errorType, message: "failed" } };
+      },
+    });
+    const r = await delegate({ provider: "codex", task: "t", mode: "write" }, {
+      ...ctx(repo, { retry: { maxRetries: 2, retryOn: ["RATE_LIMIT", "TIMEOUT"] } }),
+      adapters: { codex: make("codex"), antigravity: make("antigravity") },
+    });
+    try {
+      expect(calls).toEqual(["codex"]);
+      expect(r.status).toBe(errorType === "CANCELLED" ? "cancelled" : "partial");
+      expect(r.errorType).toBe(errorType);
+      expect(r.attempts).toEqual([expect.objectContaining({ provider: "codex", errorType })]);
+      expect(r.diff).toContain("+partial work");
+      expect(r.filesChanged).toEqual(["pending.txt"]);
+      expect(await readMeta(r.worktreePath!)).toMatchObject({ id: r.id, state: "recoverable" });
+      if (errorType !== "CANCELLED") {
+        expect(r.nextSteps.join(" ")).toContain("`delegation_apply`");
+        expect(r.nextSteps.join(" ")).toContain("`delegation_discard` with the worktreePath, then a new `delegate`");
+      }
+    } finally {
+      await removeWorktree(await readMeta(r.worktreePath!));
+    }
+  });
+
+  it.each(["crash-write", "crash"])("real CLI %s preserves only writes and otherwise falls back", async (mode) => {
+    const repo = makeRepo();
+    process.env.FAKE_MODE = mode;
+    const r = await delegate({ provider: "codex", task: "t", mode: "write" }, ctx(repo));
+    if (mode === "crash-write") {
+      expect(r.status).toBe("partial");
+      expect(r.errorType).toBe("NON_ZERO_EXIT");
+      expect(r.attempts).toHaveLength(1);
+      expect(r.diff).toContain("+partial work");
+      const meta = await readMeta(r.worktreePath!);
+      expect(meta.state).toBe("recoverable");
+      await removeWorktree(meta);
+    } else {
+      expect(r.status).toBe("fallback_to_claude");
+      expect(r.attempts.map((a) => a.provider)).toContain("antigravity");
+      expect(r.worktreePath).toBeUndefined();
+      expect(git(repo, "branch", "--list", "mp/*")).toBe("");
+    }
   });
 });

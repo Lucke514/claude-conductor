@@ -78,7 +78,7 @@ Ejemplo completo: [`config/multiprovider.example.json`](config/multiprovider.exa
 | `isolation.includeUncommitted` | `true` | La base del worktree incluye los cambios *tracked* sin commitear (`git stash create`) |
 | `isolation.symlink` | `[]` | Directorios enlazados en el worktree (ej. `node_modules`, para poder correr lint/tests). Nunca se enlazan rutas de secretos (`.env*`) |
 | `isolation.symlinkByRepo` | `{}` | `symlink` por repo anidado, p. ej. `{"backend-monolith":["node_modules"]}` (ver [repos anidados](docs/nested-repos.md)) |
-| `verify.commands` | `[]` | Ej. `["npm run lint","npm test"]`. Se ejecutan sin shell dentro del worktree (hook PostToolUse) |
+| `verify.commands` | `[]` | Ej. `["npm run lint","npm test"]`. Se ejecutan sin shell dentro del worktree, en la fase `verifying` del job (cancelable); con sintaxis de shell quedan `manual` |
 | `autoDelegate.enabled` | `true` | Delegación automática en cada mensaje (`/mp-auto on\|off`) |
 | `statusline.mode` | `"compact"` | `full` / `compact` / `off` |
 | `guardrails.checkRemotePush` | `true` | Tras cada delegación, busca la rama `mp/*` en los remotos (`git ls-remote`, 10 s) y la marca como `worker_push` si un worker la publicó |
@@ -146,6 +146,14 @@ Para features escritas con [spec-driven](https://github.com/Lucke514/spec-driven
 4. Aplicas (`delegation_apply`) o descartas (`delegation_discard` + `sdd_task_release`). Marcar la casilla y escribir `Notes` lo hace Claude tras su revisión.
 
 Detalle, formato de la respuesta y límites en [`docs/sdd-task-delegation.md`](docs/sdd-task-delegation.md).
+
+### Ciclo de vida de las delegaciones
+
+Cada worktree `mp/*` tiene un estado (`running`, `verifying`, `awaiting_review`, `recoverable` o `discardable`). La limpieza automática solo borra los `discardable`: un diff que espera tu revisión nunca se pierde, y la card avisa de los que llevan más de 7 días.
+
+Un worker que falla después de cambiar archivos devuelve `partial` con su diff, y no se lanza otro proveedor encima. La verificación corre dentro del job y se puede cancelar.
+
+`delegation_apply` acepta el `patchSha256` que revisaste: si el diff cambió, devuelve `PATCH_CHANGED`, y con conflictos no toca tu checkout salvo que pases `allowConflicts`. Detalle en [`docs/delegation-lifecycle.md`](docs/delegation-lifecycle.md).
 
 ### Workspaces con repos anidados
 
@@ -338,6 +346,7 @@ Instalación: el formato actual de plugins **no** permite declarar `statusLine` 
 | **El worker no ve el código (solo `specs/`, `docs/`…)** | El código está en un repo anidado e ignorado por la raíz. Pasa `repo` a `delegate` o pon `**Repo**` en la tarea; `/mp-doctor` lista los repos anidados (`workspace repos`). |
 | **`UNSAFE_READ_MODE`** | `readMode: "cwd"` dejaría al worker leer `.env*` reales. Usa `readMode: "worktree"` (por defecto) o, asumiendo el riesgo, `allowCwdWithSecrets: true`. |
 | **`REPO_INVALID` / `REPO_NOT_GIT` / `REPO_NOT_FOUND`** | `repo` o `**Repo**` no apunta a la raíz de un repo git dentro del proyecto; el mensaje dice qué regla falló y, para un subdirectorio, cuál es la raíz. |
+| **`PATCH_CHANGED` / `conflicts` / `TASK_IN_FLIGHT`** | `PATCH_CHANGED`: el diff cambió desde que lo revisaste (por ejemplo, la verificación ejecutó un `--fix`); revisa el diff nuevo y aplica con su `patchSha256`. `conflicts`: tu checkout no se tocó; resuélvelo a mano con `patchFile` o aplica con `allowConflicts: true`. `TASK_IN_FLIGHT`: otra sesión ya está delegando esa tarea. |
 
 ## Limitaciones conocidas
 
@@ -371,7 +380,8 @@ hooks/conductor/{card.tsx,model.ts}   types/index.d.ts   tests/conductor-card.te
 config/multiprovider.example.json     statusline/index.js   .github/workflows/ci.yml
 specs/<slug>/{spec,plan,tasks}.md     docs/*.md
 server/  bootstrap.mjs · src/{index,cli,config,delegate,fallback,circuit-breaker,health,worktree,
-         prompt-builder,process,state,audit,hooks,setup,sanitize,gh-scrub,doctor,worker-env,remote-check}.ts · providers/{types,codex,antigravity}.ts
+         prompt-builder,process,state,audit,hooks,setup,sanitize,gh-scrub,doctor,worker-env,remote-check,
+         pending,reservations,verify-commands,jobs}.ts · providers/{types,codex,antigravity}.ts
          sdd/{artifacts,brief,claim,verify,task-delegation,pipeline}.ts
          tests/ (vitest *.spec.ts + binarios fake) · dist/ (compilado, versionado)
 ```

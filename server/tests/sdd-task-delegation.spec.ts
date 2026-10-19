@@ -1,13 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { JobRegistry, progressLine } from "../src/jobs.js";
 import { logsDir } from "../src/paths.js";
+import { lockFilePath } from "../src/reservations.js";
 import { StateStore } from "../src/state.js";
-import { parseAcceptance, sddTaskClaim, sddTaskDelegate, sddTaskRelease } from "../src/sdd/task-delegation.js";
+import { parseAcceptance, sddTaskClaim, sddTaskDelegate, sddTaskRelease, taskReservationKey } from "../src/sdd/task-delegation.js";
 import { applyWorktree, removeWorktree, readMeta } from "../src/worktree.js";
 import type { ProviderAdapter, ProviderName } from "../src/providers/types.js";
-import { makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
+import { isAlive, makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
 import { PLAN, SPEC, TASKS, writeFeature } from "./sdd-fixtures.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
@@ -137,6 +140,33 @@ describe("sdd_task_* tools", () => {
     await removeWorktree(await readMeta(r.worktreePath!));
   });
 
+  it("R4: SDD Verify runs in the job and cancellation skips gates, retaining the claim", async () => {
+    const pidFile = path.join(tmpDir(), "sdd-verify-pid");
+    const fixture = fileURLToPath(new URL("./fixtures/sleep.mjs", import.meta.url));
+    const command = `node "${fixture}" 30 "${pidFile}"`;
+    const s = setup(TASKS.replace('node -e "process.exit(0)"', command));
+    const claim = await claimAndCommit(s);
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const jobs = new JobRegistry(s.ctx.store);
+    const pending = sddTaskDelegate({ slug: "demo", task: "T3" }, { ...s.ctx, jobs });
+    for (let i = 0; i < 120 && !existsSync(pidFile); i++) await new Promise(r => setTimeout(r, 50));
+    const [job] = await jobs.status();
+    expect(job).toMatchObject({ phase: "verifying", detail: progressLine(command) });
+    expect(existsSync(pidFile)).toBe(true);
+    jobs.cancel(job!.id);
+    const r = await pending;
+    expect(r.verification?.result).toBe("cancelled");
+    expect(r.sdd.verification).toEqual([expect.objectContaining({ kind: "verify", result: "cancelled" })]);
+    expect(r.sdd.verified).toBe(false);
+    expect(r.sdd.handback).toBeUndefined();
+    expect(readFileSync(s.tasksFile, "utf8")).toContain(claim.owner);
+    expect(isAlive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
+    expect((await readMeta(r.worktreePath!)).state).toBe("awaiting_review");
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
   it("R9: when every provider fails the Owner goes back to — (handback)", async () => {
     const s = setup();
     await claimAndCommit(s);
@@ -207,6 +237,129 @@ describe("sdd_task_* tools", () => {
       ["E2", "unverifiable", "no test"],
       ["R1", "unverifiable", "no line for this item in the worker's ## Acceptance section"],
     ]);
+  });
+
+  it("SC4/R7/R8: two simultaneous sdd_task_delegate calls: one runs, other fails with TASK_IN_FLIGHT, adapter called once, rejection audited", async () => {
+    const s = setup();
+    await claimAndCommit(s);
+    let adapterCalls = 0;
+    const slowAdapter: ProviderAdapter = {
+      name: "codex",
+      isAvailable: async () => true,
+      healthCheck: async () => ({}) as never,
+      run: async () => {
+        adapterCalls++;
+        await new Promise((r) => setTimeout(r, 150));
+        return { ok: true, output: WORKER, exitCode: 0, durationMs: 150 };
+      },
+    };
+    const ctx = {
+      ...s.ctx,
+      adapters: {
+        codex: slowAdapter,
+        antigravity: {
+          name: "antigravity" as const,
+          isAvailable: async () => false,
+          healthCheck: async () => ({}) as never,
+          run: async () => ({ ok: false, output: "", exitCode: 1, durationMs: 0 }),
+        },
+      },
+    };
+
+    const p1 = sddTaskDelegate({ slug: "demo", task: "T3" }, ctx);
+    // Yield to let p1 acquire the lock and start delegate
+    await new Promise((r) => setTimeout(r, 20));
+    const p2 = sddTaskDelegate({ slug: "demo", task: "T3" }, ctx);
+
+    const err = await p2.catch((e) => e);
+    expect(err).toMatchObject({ code: "TASK_IN_FLIGHT" });
+    expect(err.message).toContain("T3 of demo is already being delegated");
+
+    const r1 = await p1;
+    expect(r1.status).toBe("success");
+    expect(adapterCalls).toBe(1);
+
+    // Audit log records TASK_IN_FLIGHT
+    const log = readdirSync(logsDir()).map((f) => readFileSync(path.join(logsDir(), f), "utf8")).join("");
+    const lines = log.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const rejectedEntry = lines.find((l) => l.type === "TASK_IN_FLIGHT");
+    expect(rejectedEntry).toBeDefined();
+    expect(rejectedEntry?.sdd).toEqual({ slug: "demo", taskId: "T3" });
+    expect(rejectedEntry?.heldBy).toBeDefined();
+
+    // Lock file is removed after completion
+    const lock = lockFilePath(await taskReservationKey(s.repo, "demo", "T3"));
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it("R7: lock file is released on completion, error, or cancellation", async () => {
+    const s1 = setup();
+    await claimAndCommit(s1);
+    const lock1 = lockFilePath(await taskReservationKey(s1.repo, "demo", "T3"));
+
+    // On crash (error)
+    process.env.FAKE_MODE = "crash";
+    await sddTaskDelegate({ slug: "demo", task: "T3" }, s1.ctx);
+    expect(existsSync(lock1)).toBe(false);
+
+    // On cancellation
+    const s2 = setup();
+    await claimAndCommit(s2);
+    const lock2 = lockFilePath(await taskReservationKey(s2.repo, "demo", "T3"));
+
+    process.env.FAKE_MODE = "hang-write";
+    const ac = new AbortController();
+    const run = sddTaskDelegate({ slug: "demo", task: "T3" }, { ...s2.ctx, signal: ac.signal });
+    await new Promise((r) => setTimeout(r, 700));
+    ac.abort();
+    const r = await run;
+    expect(r.status).toBe("cancelled");
+    expect(existsSync(lock2)).toBe(false);
+    if (r.worktreePath) await removeWorktree(await readMeta(r.worktreePath));
+  });
+
+  it("R7/E6: orphan lock with dead PID is replaced with a note in notes", async () => {
+    const s = setup();
+    await claimAndCommit(s);
+    const key = await taskReservationKey(s.repo, "demo", "T3");
+    const lock = lockFilePath(key);
+    mkdirSync(path.dirname(lock), { recursive: true });
+    writeFileSync(
+      lock,
+      JSON.stringify({ key, id: "stale-dead-pid", pid: 99999999, startedAt: new Date().toISOString() }),
+    );
+
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, s.ctx);
+    expect(r.status).toBe("success");
+    expect(r.notes?.some((n) => /orphan|huérfano/i.test(n) && n.includes("stale-dead-pid"))).toBe(true);
+    expect(existsSync(lock)).toBe(false);
+    if (r.worktreePath) await removeWorktree(await readMeta(r.worktreePath));
+  });
+
+  it("E6: orphan lock with living PID but older than writeTimeoutMs + verify.timeoutMs is replaced with a note", async () => {
+    const s = setup();
+    await claimAndCommit(s);
+    const key = await taskReservationKey(s.repo, "demo", "T3");
+    const lock = lockFilePath(key);
+    mkdirSync(path.dirname(lock), { recursive: true });
+    // Started 3 hours ago (> default writeTimeoutMs 30m + verify.timeoutMs 5m = 35m)
+    const oldTime = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+    writeFileSync(
+      lock,
+      JSON.stringify({ key, id: "stale-alive-pid", pid: process.pid, startedAt: oldTime }),
+    );
+
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const r = await sddTaskDelegate({ slug: "demo", task: "T3" }, s.ctx);
+    expect(r.status).toBe("success");
+    expect(r.notes?.some((n) => /orphan|huérfano/i.test(n) && n.includes("stale-alive-pid"))).toBe(true);
+    expect(existsSync(lock)).toBe(false);
+    if (r.worktreePath) await removeWorktree(await readMeta(r.worktreePath));
   });
 });
 

@@ -2,9 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 export class SddError extends Error {
     code;
-    constructor(code, message) {
+    heldBy;
+    constructor(code, message, heldBy) {
         super(message);
         this.code = code;
+        this.heldBy = heldBy;
         this.name = "SddError";
     }
 }

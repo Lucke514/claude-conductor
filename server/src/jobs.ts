@@ -1,6 +1,6 @@
 import type { Mode } from "./providers/types.js";
 import type { StateStore } from "./state.js";
-import { changedFiles, type WorktreeMeta } from "./worktree.js";
+import { changedFiles, readMeta, setMetaState, type WorktreeMeta } from "./worktree.js";
 
 /**
  * Delegations in flight, so they can be watched (`delegation_status`) and stopped
@@ -16,7 +16,7 @@ export const MAX_PROGRESS_CHARS = 200;
 const PERSIST_EVERY_MS = 1000;
 const MAX_LOST = 10;
 
-export type JobPhase = "running" | "cancelled" | "done" | "lost";
+export type JobPhase = "running" | "verifying" | "cancelled" | "done" | "lost";
 
 export interface JobSnapshot {
   id: string;
@@ -27,6 +27,8 @@ export interface JobSnapshot {
   sdd?: { slug: string; taskId: string };
   phase: JobPhase;
   startedAt: string;
+  detail?: string;
+  worktreePath?: string;
   lastProgress?: string;
   filesChanged?: number;
   /** The MCP server process that runs the job (E5: a dead pid means the job was lost). */
@@ -94,6 +96,15 @@ export class JobRegistry {
     if (!job) return;
     job.info.provider = provider;
     job.worktree = worktree;
+    job.info.worktreePath = worktree?.path;
+    void this.persist(job, true);
+  }
+
+  setPhase(id: string, phase: JobPhase, detail?: string): void {
+    const job = this.jobs.get(id);
+    if (!job || job.controller.signal.aborted) return;
+    job.info.phase = phase;
+    job.info.detail = detail ? progressLine(detail) : undefined;
     void this.persist(job, true);
   }
 
@@ -157,12 +168,20 @@ export class JobRegistry {
     let lost: JobSnapshot[] = [];
     await this.store.update((s) => {
       const jobs = s.jobs ?? [];
-      lost = jobs.filter((j) => j.phase === "running" && j.pid !== process.pid && !isPidAlive(j.pid)).map((j) => ({ ...j, phase: "lost" as const }));
+      lost = jobs.filter((j) => (j.phase === "running" || j.phase === "verifying") && j.pid !== process.pid && !isPidAlive(j.pid)).map((j) => ({ ...j, phase: "lost" as const }));
       // Keep the last few lost jobs for delegation_status; running ones stay as they are.
       const kept = jobs.filter((j) => !lost.some((l) => l.id === j.id));
       const oldLost = kept.filter((j) => j.phase === "lost");
       s.jobs = [...kept.filter((j) => j.phase !== "lost"), ...[...oldLost, ...lost].slice(-MAX_LOST)];
     }).catch(() => undefined);
+    for (const job of lost) {
+      if (!job.worktreePath) continue;
+      await readMeta(job.worktreePath).then(async meta => {
+        if (meta.id === job.id && (meta.state === "running" || meta.state === "verifying")) {
+          await setMetaState(job.worktreePath!, "recoverable");
+        }
+      }).catch(() => undefined);
+    }
     return lost;
   }
 
@@ -171,11 +190,13 @@ export class JobRegistry {
     const now = Date.now();
     if (!force && now - job.persistedAt < PERSIST_EVERY_MS) return;
     job.persistedAt = now;
-    const snapshot = { ...job.info };
+    const id = job.info.id;
     await this.store.update((s) => {
       // A write queued before finish() must not bring a finished job back.
-      if (!this.jobs.has(snapshot.id)) return;
-      s.jobs = [...(s.jobs ?? []).filter((j) => j.id !== snapshot.id), snapshot];
+      if (!this.jobs.has(id)) return;
+      // The lock does not keep call order: write the job as it is now, so an older write
+      // that lands last cannot roll back a newer phase or detail.
+      s.jobs = [...(s.jobs ?? []).filter((j) => j.id !== id), { ...job.info }];
     }).catch(() => undefined);
   }
 }

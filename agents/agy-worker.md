@@ -43,11 +43,13 @@ VERDICT: ACCEPT | REQUEST_CHANGES | DISCARD
 delegation: <id from the delegate response>
 provider: <provider actually used>, requested <requestedProvider> (attempts: <short summary>)
 worktreePath: <path or n/a>
+patchSha256: <sha256 of the patch, or n/a>
 verified: <what you checked and how — files read, commands run with exit codes>
 issues: <numbered list, or "none">
 recommendation: <one or two sentences for Claude>
 ```
 
-- ACCEPT only if every claim you relied on was confirmed and lint/tests pass in the worktree.
+- ACCEPT only if every claim you relied on was confirmed and lint/tests pass in the worktree. Claude will then call `delegation_apply` with `expectedPatchSha256` and commit. If it returns `PATCH_CHANGED`, re-verify the diff. If it returns `conflicts`, report them to the user (they can choose to apply with `allowConflicts: true` or resolve by hand).
 - REQUEST_CHANGES: list the concrete fixes.
 - DISCARD: wrong or unsafe; if you are sure, call `delegation_discard` with the `worktreePath`.
+

@@ -191,7 +191,7 @@ describe("audit log (R8, E9)", () => {
     process.env.FAKE_WRITE_FILE = "specs/demo/tasks.md,index.ts,extra.txt";
     const r = await delegate({ provider: "codex", task: "audit", mode: "write", scopeFiles: ["index.ts"] }, ctx(repo));
     const log = readdirSync(logsDir()).map((f) => readFileSync(path.join(logsDir(), f), "utf8")).join("");
-    const entry = log.split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.id === r.id);
+    const entry = log.split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.id === r.id && e.type !== "lifecycle");
     expect(entry.violations.map((v: { type: string }) => v.type).sort()).toEqual(["outside_task_files", "specs_modified", "worker_push"]);
     for (const v of entry.violations) expect(typeof v.detail).toBe("string");
     expect(log).not.toContain(SECRET);
