@@ -5,14 +5,14 @@ import { chainFor, resolveOrder, routeTask, runChain, type Attempt, type ChainEn
 import { repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
-import { PROVIDER_NAMES, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
+import { PROVIDER_NAMES, type ErrorType, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
 import { RepoError, resolveRepo } from "./repo.js";
 import { scanSecrets } from "./secrets-scan.js";
 import { recordCall, recordRecent, registerRepo, taskLabel, type StateStore } from "./state.js";
 import type { JobRegistry } from "./jobs.js";
 import { checkRemotePush, type PushViolation } from "./remote-check.js";
 import { ensureShims, workerEnv } from "./worker-env.js";
-import { collectChanges, createWorktree, removeWorktree, type Changes, type Violation, type WorktreeMeta } from "./worktree.js";
+import { collectChanges, createWorktree, removeWorktree, setMetaState, type Changes, type Violation, type WorktreeMeta } from "./worktree.js";
 
 export interface DelegateParams {
   provider: ProviderName | "auto";
@@ -45,6 +45,7 @@ export interface DelegateResponse {
   provider: ProviderName | null;
   model: string | null;
   status: DelegateStatus;
+  errorType?: ErrorType;
   mode: Mode;
   /** The `repo` the delegation worked on (relative to the project), when one was given. */
   repo?: string;
@@ -96,11 +97,6 @@ export interface DelegateContext {
   /** Registers the delegation for delegation_status / delegation_cancel. */
   jobs?: JobRegistry;
 }
-
-/** Failed writes whose worktree is kept when it has changes. */
-const KEEP_ON: string[] = ["CANCELLED", "TIMEOUT", "STALLED"];
-/** Of those, the ones that end the chain as `partial` (R5); CANCELLED ends it as `cancelled`. */
-const STOP_ON: string[] = ["TIMEOUT", "STALLED"];
 
 export async function delegate(params: DelegateParams, ctx: DelegateContext): Promise<DelegateResponse> {
   const started = Date.now();
@@ -194,6 +190,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
       let meta: WorktreeMeta | undefined;
       if (isolate && repoRoot) {
         meta = await createWorktree({
+          id,
           cwd: repoRoot,
           provider,
           includeUncommitted: config.isolation.includeUncommitted,
@@ -248,10 +245,11 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
             });
           }
         }
-        // A cancelled, timed-out or stalled write keeps what the worker already did (E3, R5), like a finished one.
-        const keep = result.ok || KEEP_ON.includes(result.error?.type ?? "NON_ZERO_EXIT");
+        // Any failed write preserves the work already done, without retrying the task.
+        const keep = changes.files.length > 0;
         lastHadChanges = mode === "write" && changes.files.length > 0;
-        if (mode === "write" && keep && changes.files.length > 0) {
+        if (mode === "write" && keep) {
+          meta = await setMetaState(meta.path, result.ok ? "verifying" : "recoverable");
           kept = { meta, changes };
         } else {
           await removeWorktree(meta).catch(() => undefined);
@@ -268,7 +266,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
       execute,
       ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
       ...(signal ? { signal } : {}),
-      shouldStop: (_provider, result) => lastHadChanges && STOP_ON.includes(result.error?.type ?? "NON_ZERO_EXIT"),
+      shouldStop: (_provider, result) => lastHadChanges && !result.ok,
       onAttempt: async (provider, result) => {
         await ctx.store.update((s) => {
           recordCall(s, {
@@ -294,6 +292,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
       provider: outcome.provider ?? null,
       model: result?.model ?? null,
       status: outcome.status,
+      ...(result && !result.ok ? { errorType: result.error?.type ?? "NON_ZERO_EXIT" } : {}),
       output: result?.output ?? "",
       attempts: outcome.attempts,
       ...(outcome.summary ? { summary: outcome.summary } : {}),
@@ -384,8 +383,8 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
 function nextSteps(r: DelegateResponse): string[] {
   if (r.status === "partial") {
     return [
-      `The worker ran out of time (${r.attempts.at(-1)?.errorType ?? "TIMEOUT"}) after changing files; nothing was retried. Its work is in ${r.worktreePath} (see \`diff\`, full patch in \`patchFile\`).`,
-      "Review it like any diff. Keep it: `delegation_apply` with the worktreePath and finish the rest yourself, or delegate the remainder. Drop it: `delegation_discard`.",
+      `The worker failed (${r.errorType ?? r.attempts.at(-1)?.errorType ?? "NON_ZERO_EXIT"}) after changing files; nothing was retried. Its work is in ${r.worktreePath} (see \`diff\`, full patch in \`patchFile\`).`,
+      "Review the diff. Apply it: `delegation_apply` with the worktreePath. Try another provider: `delegation_discard` with the worktreePath, then a new `delegate` with that provider. Discard it: `delegation_discard` with the worktreePath.",
     ];
   }
   if (r.status === "cancelled") {

@@ -172,6 +172,9 @@ process.stdin.on("end", () => {
       process.stdout.write("this is not json at all\n");
       process.exit(0);
       break;
+    case "crash-write":
+      writeFileSync(path.join(cwd, "added-by-worker.txt"), "partial work\n");
+      // Fall through to the same failure as a crash without changes.
     case "crash":
       process.stderr.write("panic: something broke\n");
       process.exit(3);

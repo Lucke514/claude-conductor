@@ -90,8 +90,8 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 
 ## T4 — Conservar cualquier write fallido con cambios
 
-- [ ] Done
-- **Owner**: codex (multi-provider) since 2026-10-19
+- [x] Done
+- **Owner**: —
 - **Component**: C3 · **Implements**: R3
 - **Files**: `server/src/delegate.ts`, `server/tests/delegate.spec.ts`, `server/tests/fixtures/fake-codex.mjs`
 - **Do**:
@@ -110,7 +110,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
   - un `NON_ZERO_EXIT` sin cambios sigue pasando al siguiente proveedor;
   - los casos existentes de `TIMEOUT`, `STALLED` y `CANCELLED` siguen pasando.
 - **Verify**: `npm --prefix server test -- delegate fallback`
-- **Notes**: —
+- **Notes**: Delegada a codex (delegación `20261019002418-883ccf`), revisada, corregida y aplicada por Claude. `delegate()` pasa su `id` a `createWorktree`; `KEEP_ON`/`STOP_ON` desaparecen: en write, un intento con cambios se conserva siempre y `shouldStop` corta la cadena ante cualquier error con cambios; un error deja la meta `recoverable` y un éxito `verifying` (T5 la pasa a `awaiting_review`); la respuesta gana `errorType` y los `nextSteps` de `partial` nombran aplicar, otro proveedor (`delegation_discard` + `delegate`) o descartar. `fake-codex.mjs` gana `FAKE_MODE=crash-write` (en lugar de `write-then-fail`; sale con 3). Tests: un `it.each(ERROR_TYPES)` y SC3 con el CLI falso. El gate Tests falló en el worktree (`guardrails.spec.ts`: el test tomaba la primera línea de auditoría con el id de la delegación, que ahora es la `lifecycle`); Claude lo corrigió filtrando `type !== "lifecycle"` — fuera de los `Files` de la tarea. Gates tras el arreglo: typecheck 0 errores, 333 passed, plugin validate ok, plugin test 12 pass. Clean-code: línea en blanco doble en el test, corregida · close calls: la caída deliberada `crash-write` → `crash` del switch del fixture no tiene `eslint` que la marque (no hay lint configurado)
 
 ## T5 — Verificación dentro del job, cancelable
 

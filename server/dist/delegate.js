@@ -10,7 +10,7 @@ import { scanSecrets } from "./secrets-scan.js";
 import { recordCall, recordRecent, registerRepo, taskLabel } from "./state.js";
 import { checkRemotePush } from "./remote-check.js";
 import { ensureShims, workerEnv } from "./worker-env.js";
-import { collectChanges, createWorktree, removeWorktree } from "./worktree.js";
+import { collectChanges, createWorktree, removeWorktree, setMetaState } from "./worktree.js";
 const normPath = (p) => p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
 /** Changed files not covered by the task's Files (exact path, or under an entry ending in `/`). */
 export function outsideScope(changed, scope) {
@@ -20,10 +20,6 @@ export function outsideScope(changed, scope) {
         return !entries.some((e) => (e.endsWith("/") ? file.startsWith(e) : file === e));
     });
 }
-/** Failed writes whose worktree is kept when it has changes. */
-const KEEP_ON = ["CANCELLED", "TIMEOUT", "STALLED"];
-/** Of those, the ones that end the chain as `partial` (R5); CANCELLED ends it as `cancelled`. */
-const STOP_ON = ["TIMEOUT", "STALLED"];
 export async function delegate(params, ctx) {
     const started = Date.now();
     const id = `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomBytes(3).toString("hex")}`;
@@ -109,6 +105,7 @@ export async function delegate(params, ctx) {
             let meta;
             if (isolate && repoRoot) {
                 meta = await createWorktree({
+                    id,
                     cwd: repoRoot,
                     provider,
                     includeUncommitted: config.isolation.includeUncommitted,
@@ -165,10 +162,11 @@ export async function delegate(params, ctx) {
                         });
                     }
                 }
-                // A cancelled, timed-out or stalled write keeps what the worker already did (E3, R5), like a finished one.
-                const keep = result.ok || KEEP_ON.includes(result.error?.type ?? "NON_ZERO_EXIT");
+                // Any failed write preserves the work already done, without retrying the task.
+                const keep = changes.files.length > 0;
                 lastHadChanges = mode === "write" && changes.files.length > 0;
-                if (mode === "write" && keep && changes.files.length > 0) {
+                if (mode === "write" && keep) {
+                    meta = await setMetaState(meta.path, result.ok ? "verifying" : "recoverable");
                     kept = { meta, changes };
                 }
                 else {
@@ -186,7 +184,7 @@ export async function delegate(params, ctx) {
             execute,
             ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
             ...(signal ? { signal } : {}),
-            shouldStop: (_provider, result) => lastHadChanges && STOP_ON.includes(result.error?.type ?? "NON_ZERO_EXIT"),
+            shouldStop: (_provider, result) => lastHadChanges && !result.ok,
             onAttempt: async (provider, result) => {
                 await ctx.store.update((s) => {
                     recordCall(s, {
@@ -211,6 +209,7 @@ export async function delegate(params, ctx) {
             provider: outcome.provider ?? null,
             model: result?.model ?? null,
             status: outcome.status,
+            ...(result && !result.ok ? { errorType: result.error?.type ?? "NON_ZERO_EXIT" } : {}),
             output: result?.output ?? "",
             attempts: outcome.attempts,
             ...(outcome.summary ? { summary: outcome.summary } : {}),
@@ -297,8 +296,8 @@ export async function delegate(params, ctx) {
 function nextSteps(r) {
     if (r.status === "partial") {
         return [
-            `The worker ran out of time (${r.attempts.at(-1)?.errorType ?? "TIMEOUT"}) after changing files; nothing was retried. Its work is in ${r.worktreePath} (see \`diff\`, full patch in \`patchFile\`).`,
-            "Review it like any diff. Keep it: `delegation_apply` with the worktreePath and finish the rest yourself, or delegate the remainder. Drop it: `delegation_discard`.",
+            `The worker failed (${r.errorType ?? r.attempts.at(-1)?.errorType ?? "NON_ZERO_EXIT"}) after changing files; nothing was retried. Its work is in ${r.worktreePath} (see \`diff\`, full patch in \`patchFile\`).`,
+            "Review the diff. Apply it: `delegation_apply` with the worktreePath. Try another provider: `delegation_discard` with the worktreePath, then a new `delegate` with that provider. Discard it: `delegation_discard` with the worktreePath.",
         ];
     }
     if (r.status === "cancelled") {

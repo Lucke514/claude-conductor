@@ -7,7 +7,7 @@ import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
 import { knownRepoDirs } from "../src/repo.js";
 import { applyWorktree, cleanupWorktrees, createWorktree, effectiveState, listWorktrees, readMeta, removeWorktree, setMetaState, worktreeAgeMs } from "../src/worktree.js";
-import type { ProviderAdapter, ProviderName } from "../src/providers/types.js";
+import { ERROR_TYPES, type ProviderAdapter, type ProviderName } from "../src/providers/types.js";
 import { FAKE_CODEX, isAlive, makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
@@ -77,6 +77,7 @@ describe("delegate (integration with fake CLIs)", () => {
     expect(r.diff).toContain("+hello from worker");
     expect(r.filesChanged).toEqual(["added-by-worker.txt"]);
     expect(r.violations).toBeUndefined();
+    expect((await readMeta(r.worktreePath!)).state).toBe("verifying");
     expect(existsSync(path.join(repo, "added-by-worker.txt"))).toBe(false);
 
     const applied = await applyWorktree(r.worktreePath!, "t1");
@@ -295,7 +296,7 @@ describe("provider-reliability R4/R5: idle timeout and partial results", () => {
     expect(r.attempts).toEqual([expect.objectContaining({ provider: "codex", errorType: "STALLED" })]);
     expect(r.diff).toContain("partial work");
     expect(r.patchFile && existsSync(r.patchFile)).toBe(true);
-    expect(r.nextSteps[0]).toContain("ran out of time");
+    expect(r.nextSteps[0]).toContain("failed (STALLED)");
     expect(git(repo, "branch", "--list", "mp/*").split("\n").filter(Boolean)).toHaveLength(1);
     expect((await c.store.read()).providers.codex?.breaker?.consecutiveFailures ?? 0).toBe(0);
     await removeWorktree(await readMeta(r.worktreePath!));
@@ -769,5 +770,61 @@ describe("delegation-lifecycle cleanup", () => {
     expect(immediate.kept.map((e) => e.state)).toEqual(["awaiting_review"]);
     expect(git(repo, "branch", "--list", "mp/orphan")).toBe("");
     await cleanupWorktrees(repo, { force: true });
+  });
+});
+
+describe("delegation-lifecycle failed write fallback", () => {
+  it.each(ERROR_TYPES)("preserves changes after %s and never retries or starts another provider", async (errorType) => {
+    const repo = makeRepo();
+    const calls: ProviderName[] = [];
+    const make = (name: ProviderName): ProviderAdapter => ({
+      name,
+      isAvailable: async () => true,
+      healthCheck: async () => ({}) as never,
+      run: async ({ cwd }) => {
+        calls.push(name);
+        writeFileSync(path.join(cwd, "pending.txt"), "partial work\n");
+        return { ok: false, output: "", exitCode: 1, durationMs: 1, error: { type: errorType, message: "failed" } };
+      },
+    });
+    const r = await delegate({ provider: "codex", task: "t", mode: "write" }, {
+      ...ctx(repo, { retry: { maxRetries: 2, retryOn: ["RATE_LIMIT", "TIMEOUT"] } }),
+      adapters: { codex: make("codex"), antigravity: make("antigravity") },
+    });
+    try {
+      expect(calls).toEqual(["codex"]);
+      expect(r.status).toBe(errorType === "CANCELLED" ? "cancelled" : "partial");
+      expect(r.errorType).toBe(errorType);
+      expect(r.attempts).toEqual([expect.objectContaining({ provider: "codex", errorType })]);
+      expect(r.diff).toContain("+partial work");
+      expect(r.filesChanged).toEqual(["pending.txt"]);
+      expect(await readMeta(r.worktreePath!)).toMatchObject({ id: r.id, state: "recoverable" });
+      if (errorType !== "CANCELLED") {
+        expect(r.nextSteps.join(" ")).toContain("`delegation_apply`");
+        expect(r.nextSteps.join(" ")).toContain("`delegation_discard` with the worktreePath, then a new `delegate`");
+      }
+    } finally {
+      await removeWorktree(await readMeta(r.worktreePath!));
+    }
+  });
+
+  it.each(["crash-write", "crash"])("real CLI %s preserves only writes and otherwise falls back", async (mode) => {
+    const repo = makeRepo();
+    process.env.FAKE_MODE = mode;
+    const r = await delegate({ provider: "codex", task: "t", mode: "write" }, ctx(repo));
+    if (mode === "crash-write") {
+      expect(r.status).toBe("partial");
+      expect(r.errorType).toBe("NON_ZERO_EXIT");
+      expect(r.attempts).toHaveLength(1);
+      expect(r.diff).toContain("+partial work");
+      const meta = await readMeta(r.worktreePath!);
+      expect(meta.state).toBe("recoverable");
+      await removeWorktree(meta);
+    } else {
+      expect(r.status).toBe("fallback_to_claude");
+      expect(r.attempts.map((a) => a.provider)).toContain("antigravity");
+      expect(r.worktreePath).toBeUndefined();
+      expect(git(repo, "branch", "--list", "mp/*")).toBe("");
+    }
   });
 });
