@@ -91,10 +91,11 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 ## T4 — Conservar cualquier write fallido con cambios
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: codex (multi-provider) since 2026-10-19
 - **Component**: C3 · **Implements**: R3
 - **Files**: `server/src/delegate.ts`, `server/tests/delegate.spec.ts`, `server/tests/fixtures/fake-codex.mjs`
 - **Do**:
+  - `delegate()` pasa su `id` a `createWorktree` (T1 lo dejó opcional), para que `setMetaState` pueda auditar cada transición.
   - En modo write, un intento con cambios en el worktree se conserva siempre (`keep = changes.files.length > 0`), sea cual sea el `errorType`. `KEEP_ON` y `STOP_ON` desaparecen.
   - `shouldStop` corta la cadena con cualquier error cuando el worktree tiene cambios: no hay reintento ni siguiente proveedor.
   - `CANCELLED` sigue terminando en `cancelled`. Cualquier otro error con cambios termina en `partial`, con `errorType` en la respuesta, `setMetaState(…, "recoverable")` y `nextSteps` con tres opciones:
