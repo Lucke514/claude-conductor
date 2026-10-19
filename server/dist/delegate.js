@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { appendAudit } from "./audit.js";
 import { chainFor, resolveOrder, routeTask, runChain } from "./fallback.js";
-import { repoRootOf } from "./git.js";
+import { gitOk, repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt } from "./prompt-builder.js";
 import { PROVIDER_NAMES } from "./providers/types.js";
@@ -10,7 +10,7 @@ import { scanSecrets } from "./secrets-scan.js";
 import { recordCall, recordRecent, registerRepo, taskLabel } from "./state.js";
 import { checkRemotePush } from "./remote-check.js";
 import { ensureShims, workerEnv } from "./worker-env.js";
-import { collectChanges, createWorktree, removeWorktree, setMetaState } from "./worktree.js";
+import { collectChanges, createWorktree, patchSha256, removeWorktree, setMetaState } from "./worktree.js";
 const normPath = (p) => p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
 /** Changed files not covered by the task's Files (exact path, or under an entry ending in `/`). */
 export function outsideScope(changed, scope) {
@@ -166,7 +166,7 @@ export async function delegate(params, ctx) {
                 const keep = changes.files.length > 0;
                 lastHadChanges = mode === "write" && changes.files.length > 0;
                 if (mode === "write" && keep) {
-                    meta = await setMetaState(meta.path, result.ok ? "verifying" : "recoverable");
+                    meta = await setMetaState(meta.path, result.ok ? "verifying" : "recoverable", { patchSha256: await patchSha256(changes) });
                     kept = { meta, changes };
                 }
                 else {
@@ -207,12 +207,40 @@ export async function delegate(params, ctx) {
         let verification;
         if (kept && outcome.result?.ok) {
             ctx.jobs?.setPhase(id, "verifying");
+            const treeBefore = (await gitOk(["write-tree"], kept.meta.path)).trim();
+            const workerFiles = [...kept.changes.files];
             verification = params.verify
                 ? await params.verify(kept.meta.path, signal, command => ctx.jobs?.setPhase(id, "verifying", command))
                 : { result: signal.aborted ? "cancelled" : "none", items: [] };
             if (signal.aborted)
                 verification.result = "cancelled";
-            kept.meta = await setMetaState(kept.meta.path, "awaiting_review", { verification: { result: verification.result } });
+            const finalChanges = await collectChanges(kept.meta, config.defaults.maxDiffBytes, `${id}-verified`);
+            const treeAfter = (await gitOk(["write-tree"], kept.meta.path)).trim();
+            let modifiedFiles = [];
+            if (treeBefore !== treeAfter || kept.changes.diff !== finalChanges.diff) {
+                if (treeBefore !== treeAfter) {
+                    modifiedFiles = (await gitOk(["diff", "--name-only", treeBefore, treeAfter], kept.meta.path))
+                        .split(/\r?\n/)
+                        .filter(Boolean);
+                }
+                if (modifiedFiles.length === 0) {
+                    const s = new Set([...workerFiles, ...finalChanges.files]);
+                    modifiedFiles = [...s];
+                }
+                violations.push({
+                    type: "verify_modified_files",
+                    detail: `verification modified ${modifiedFiles.length} file(s): ${modifiedFiles.slice(0, 10).join(", ")}`,
+                    files: modifiedFiles,
+                });
+            }
+            kept.changes = finalChanges;
+            kept.meta = await setMetaState(kept.meta.path, "awaiting_review", {
+                patchSha256: await patchSha256(finalChanges),
+                verification: {
+                    result: verification.result,
+                    ...(modifiedFiles.length ? { modifiedFiles } : {}),
+                },
+            });
         }
         const result = outcome.result;
         return finish({
@@ -254,6 +282,8 @@ export async function delegate(params, ctx) {
                 response.branch = kept.meta.branch;
                 if (kept.changes.patchFile)
                     response.patchFile = kept.changes.patchFile;
+                if (kept.meta.patchSha256)
+                    response.patchSha256 = kept.meta.patchSha256;
             }
             if (violations.length > 0)
                 response.violations = violations;

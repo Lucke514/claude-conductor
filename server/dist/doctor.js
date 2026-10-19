@@ -6,7 +6,8 @@ import { loadConfig } from "./config.js";
 import { checkHealth, makeAdapters } from "./health.js";
 import { ptyAvailable, runProcess } from "./process.js";
 import { PROVIDER_NAMES } from "./providers/types.js";
-import { workspaceRepos } from "./repo.js";
+import { PENDING_WARN_DAYS, pendingWorktrees } from "./pending.js";
+import { knownRepoDirs, workspaceRepos } from "./repo.js";
 import { scanSecrets } from "./secrets-scan.js";
 import { pluginRoot } from "./setup.js";
 const SMOKE_PROMPT = "This is a connectivity check. Do not read or modify any file. Reply with exactly: OK";
@@ -89,6 +90,7 @@ export async function runDoctor(opts) {
     const { config } = loaded;
     checks.push(mcpConfigCheck(opts.pluginRoot ?? pluginRoot()));
     checks.push(...(await workspaceChecks(opts.projectDir, config)));
+    checks.push(await pendingCheck(knownRepoDirs(opts.projectDir, (await opts.store.read().catch(() => undefined))?.repos)));
     const agy = config.providers.antigravity;
     // stream-json (the default) runs without a PTY; only text/json need node-pty.
     if (agy.enabled && (agy.usePty ?? (agy.outputFormat ?? "stream-json") !== "stream-json")) {
@@ -189,6 +191,21 @@ export async function workspaceChecks(projectDir, config) {
         });
     }
     return checks;
+}
+/** delegation-lifecycle R1/Q1: diffs that cleanup never removes, with their age. */
+export async function pendingCheck(dirs, now = Date.now()) {
+    const name = "pending worktrees";
+    const list = await pendingWorktrees(dirs, now).catch(() => []);
+    if (list.length === 0)
+        return { name, level: "ok", detail: "none: no diff awaits review" };
+    const days = (ms) => Math.floor(ms / 86_400_000);
+    const old = list.filter((p) => days(p.ageMs) >= PENDING_WARN_DAYS);
+    return {
+        name,
+        level: old.length ? "warn" : "ok",
+        detail: list.map((p) => `${p.state} ${days(p.ageMs)}d ${p.path}`).join("; "),
+        ...(old.length ? { fix: "review each diff, then delegation_apply or delegation_discard it; delegation_cleanup { force: true } removes them all" } : {}),
+    };
 }
 /** E1: which transport codex will really use. */
 export async function codexTransportCheck(cfg) {
