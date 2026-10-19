@@ -2,13 +2,15 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { JobRegistry, progressLine } from "../src/jobs.js";
 import { logsDir } from "../src/paths.js";
 import { lockFilePath } from "../src/reservations.js";
 import { StateStore } from "../src/state.js";
 import { parseAcceptance, sddTaskClaim, sddTaskDelegate, sddTaskRelease, taskReservationKey } from "../src/sdd/task-delegation.js";
 import { applyWorktree, removeWorktree, readMeta } from "../src/worktree.js";
 import type { ProviderAdapter, ProviderName } from "../src/providers/types.js";
-import { makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
+import { isAlive, makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
 import { PLAN, SPEC, TASKS, writeFeature } from "./sdd-fixtures.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
@@ -135,6 +137,33 @@ describe("sdd_task_* tools", () => {
     expect(existsSync(r.worktreePath!)).toBe(true);
     expect(readFileSync(s.tasksFile, "utf8")).toContain(`- **Owner**: ${claim.owner}`);
     expect(r.nextSteps[0]).toContain("NOT VERIFIED");
+    await removeWorktree(await readMeta(r.worktreePath!));
+  });
+
+  it("R4: SDD Verify runs in the job and cancellation skips gates, retaining the claim", async () => {
+    const pidFile = path.join(tmpDir(), "sdd-verify-pid");
+    const fixture = fileURLToPath(new URL("./fixtures/sleep.mjs", import.meta.url));
+    const command = `node "${fixture}" 30 "${pidFile}"`;
+    const s = setup(TASKS.replace('node -e "process.exit(0)"', command));
+    const claim = await claimAndCommit(s);
+    process.env.FAKE_MODE = "message";
+    process.env.FAKE_MESSAGE = WORKER;
+    process.env.FAKE_WRITE_FILE = "index.ts";
+    const jobs = new JobRegistry(s.ctx.store);
+    const pending = sddTaskDelegate({ slug: "demo", task: "T3" }, { ...s.ctx, jobs });
+    for (let i = 0; i < 120 && !existsSync(pidFile); i++) await new Promise(r => setTimeout(r, 50));
+    const [job] = await jobs.status();
+    expect(job).toMatchObject({ phase: "verifying", detail: progressLine(command) });
+    expect(existsSync(pidFile)).toBe(true);
+    jobs.cancel(job!.id);
+    const r = await pending;
+    expect(r.verification?.result).toBe("cancelled");
+    expect(r.sdd.verification).toEqual([expect.objectContaining({ kind: "verify", result: "cancelled" })]);
+    expect(r.sdd.verified).toBe(false);
+    expect(r.sdd.handback).toBeUndefined();
+    expect(readFileSync(s.tasksFile, "utf8")).toContain(claim.owner);
+    expect(isAlive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
+    expect((await readMeta(r.worktreePath!)).state).toBe("awaiting_review");
     await removeWorktree(await readMeta(r.worktreePath!));
   });
 

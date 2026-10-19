@@ -3,10 +3,11 @@ import path from "node:path";
 import { loadConfig } from "./config.js";
 import { scrubCommand } from "./gh-scrub.js";
 import { checkHealth } from "./health.js";
-import { runProcess } from "./process.js";
+import { runVerify } from "./verify-commands.js";
 import { knownRepoDirs } from "./repo.js";
 import { StateStore } from "./state.js";
 import { assertManagedPath, cleanupWorktrees } from "./worktree.js";
+export { splitCommand, runVerify } from "./verify-commands.js";
 function projectDirFrom(input) {
     const env = process.env.CLAUDE_PROJECT_DIR;
     return env && !env.includes("${") ? env : (input.cwd ?? process.cwd());
@@ -90,65 +91,7 @@ export function extractDelegateResult(resp, depth = 0) {
     }
     return undefined;
 }
-/** Split "npm run lint -- --fix" into argv, honouring simple quotes. No shell involved. */
-export function splitCommand(cmd) {
-    const out = [];
-    let cur = "";
-    let quote = null;
-    let has = false;
-    for (let i = 0; i < cmd.length; i++) {
-        const c = cmd[i];
-        if (quote) {
-            if (c === quote)
-                quote = null;
-            else if (c === "\\" && quote === '"' && i + 1 < cmd.length)
-                cur += cmd[++i];
-            else
-                cur += c;
-        }
-        else if (c === '"' || c === "'") {
-            quote = c;
-            has = true;
-        }
-        else if (/\s/.test(c)) {
-            if (has || cur)
-                out.push(cur);
-            cur = "";
-            has = false;
-        }
-        else {
-            cur += c;
-        }
-    }
-    if (has || cur)
-        out.push(cur);
-    return out;
-}
-export async function runVerify(worktreePath, config) {
-    const results = [];
-    for (const c of config.verify.commands) {
-        const argv = Array.isArray(c) ? c : splitCommand(c);
-        if (argv.length === 0)
-            continue;
-        const r = await runProcess({
-            command: argv[0],
-            args: argv.slice(1),
-            cwd: worktreePath,
-            timeoutMs: config.verify.timeoutMs,
-            env: { CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" },
-        });
-        const text = `${r.stdout}\n${r.stderr}`.trim();
-        results.push({
-            command: argv.join(" "),
-            exitCode: r.exitCode,
-            ok: r.exitCode === 0 && !r.timedOut,
-            durationMs: r.durationMs,
-            outputTail: (r.spawnError ? r.spawnError.message : r.timedOut ? `timed out after ${config.verify.timeoutMs}ms\n${text}` : text).slice(-1500),
-        });
-    }
-    return results;
-}
-/** PostToolUse(delegate): when there is a diff, run verify.commands inside the worktree. */
+/** PostToolUse(delegate): report job verification; run commands only for older servers. */
 export async function postDelegate(input) {
     const res = extractDelegateResult(input.tool_response);
     const wt = res?.worktreePath;
@@ -160,8 +103,9 @@ export async function postDelegate(input) {
     catch {
         return undefined;
     }
-    const config = await safeConfig(projectDirFrom(input));
-    if (!config || config.verify.commands.length === 0) {
+    const supplied = res.verification;
+    const config = supplied ? undefined : await safeConfig(projectDirFrom(input));
+    if (supplied?.result === "none" || (!supplied && (!config || config.verify.commands.length === 0))) {
         return {
             hookSpecificOutput: {
                 hookEventName: "PostToolUse",
@@ -169,10 +113,11 @@ export async function postDelegate(input) {
             },
         };
     }
-    const results = await runVerify(wt, config);
-    const allOk = results.every((r) => r.ok);
-    const lines = results.map((r) => `- \`${r.command}\` → ${r.ok ? "OK" : `FAILED (exit ${r.exitCode ?? "none"})`} in ${Math.round(r.durationMs / 1000)}s` +
-        (r.ok ? "" : `\n\`\`\`\n${r.outputTail}\n\`\`\``));
+    const outcome = supplied ?? await runVerify(wt, config);
+    const results = outcome.items;
+    const allOk = outcome.result === "pass";
+    const lines = results.map((r) => `- \`${r.command}\` → ${r.result === "pass" ? "OK" : r.result === "manual" ? "MANUAL" : r.result === "cancelled" ? "CANCELLED" : `FAILED (exit ${r.exitCode ?? "none"})`} in ${Math.round((r.durationMs ?? 0) / 1000)}s` +
+        (r.result === "pass" ? "" : `\n\`\`\`\n${r.outputTail ?? r.reason ?? ""}\n\`\`\``));
     return {
         hookSpecificOutput: {
             hookEventName: "PostToolUse",

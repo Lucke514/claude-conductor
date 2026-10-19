@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { runVerify } from "../src/verify-commands.js";
 import { delegate } from "../src/delegate.js";
 import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
@@ -77,7 +78,7 @@ describe("delegate (integration with fake CLIs)", () => {
     expect(r.diff).toContain("+hello from worker");
     expect(r.filesChanged).toEqual(["added-by-worker.txt"]);
     expect(r.violations).toBeUndefined();
-    expect((await readMeta(r.worktreePath!)).state).toBe("verifying");
+    expect((await readMeta(r.worktreePath!)).state).toBe("awaiting_review");
     expect(existsSync(path.join(repo, "added-by-worker.txt"))).toBe(false);
 
     const applied = await applyWorktree(r.worktreePath!, "t1");
@@ -86,6 +87,16 @@ describe("delegate (integration with fake CLIs)", () => {
     expect(git(repo, "rev-parse", "HEAD")).toBe(headBefore); // nothing committed
     expect(git(repo, "branch", "--list", "mp/*")).toBe("");
     expect(existsSync(r.worktreePath!)).toBe(false);
+  });
+
+  it("E3: shell syntax and unavailable commands are manual and await review", async () => {
+    process.env.FAKE_MODE = "write";
+    const c = ctx(makeRepo(), { verify: { commands: ["missing-verifier-binary-xyz", "npm test && echo done"] } });
+    const r = await delegate({ provider: "codex", task: "t", mode: "write",
+      verify: (wt, signal, onCommand) => runVerify(wt, c.config, signal, onCommand) }, c);
+    expect(r.verification?.items.map(i => i.result)).toEqual(["manual", "manual"]);
+    expect((await readMeta(r.worktreePath!)).state).toBe("awaiting_review");
+    await removeWorktree(await readMeta(r.worktreePath!));
   });
 
   it("worker commits are undone with reset --soft and reported as a violation", async () => {

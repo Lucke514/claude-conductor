@@ -140,6 +140,19 @@ describe("PostToolUse(delegate)", () => {
     expect(ctx).toMatch(/exit 3/);
   });
 
+  it("uses supplied verification without running configured commands", async () => {
+    const wt = path.join(worktreesDir(), "repo-x", "codex-supplied");
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(userConfig, JSON.stringify({ verify: { commands: [["node", "-e", "require('fs').writeFileSync('ran.txt','1')"]] } }));
+    const out = await postDelegate({ cwd: tmpDir(), tool_response: { status: "success", attempts: [], worktreePath: wt, diff: "+x",
+      verification: { result: "pass", items: [{ command: "npm test", result: "pass", durationMs: 42000 }] } } }) as any;
+    expect(existsSync(path.join(wt, "ran.txt"))).toBe(false);
+    expect(out.hookSpecificOutput.additionalContext).toContain("ALL PASSED");
+    expect(out.hookSpecificOutput.additionalContext).toContain("- `npm test` → OK in 42s");
+    const hooks = JSON.parse(readFileSync(new URL("../../hooks/hooks.json", import.meta.url), "utf8")).hooks;
+    expect(hooks.PostToolUse[0].hooks[0].timeout).toBe(30);
+  });
+
   it("ignores results without a diff or outside managed worktrees", async () => {
     expect(await postDelegate({ tool_response: [{ type: "text", text: JSON.stringify({ status: "success", attempts: [] }) }] })).toBeUndefined();
     const out = await postDelegate({ tool_response: { status: "success", attempts: [], worktreePath: "/etc", diff: "x" } });

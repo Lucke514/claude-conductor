@@ -40,7 +40,7 @@ export async function delegate(params, ctx) {
     // The job's controller follows the MCP request's signal and delegation_cancel alike.
     const signal = ctx.jobs
         ? ctx.jobs.start({ id, provider: null, mode, task: taskLabel(params.task), ...(params.sdd ? { sdd: params.sdd } : {}) }, ctx.signal).signal
-        : ctx.signal;
+        : ctx.signal ?? new AbortController().signal;
     try {
         return await run();
     }
@@ -204,11 +204,22 @@ export async function delegate(params, ctx) {
             for (const p of PROVIDER_NAMES)
                 (s.providers[p] ??= {}).breaker = breaker.snapshot(p);
         });
+        let verification;
+        if (kept && outcome.result?.ok) {
+            ctx.jobs?.setPhase(id, "verifying");
+            verification = params.verify
+                ? await params.verify(kept.meta.path, signal, command => ctx.jobs?.setPhase(id, "verifying", command))
+                : { result: signal.aborted ? "cancelled" : "none", items: [] };
+            if (signal.aborted)
+                verification.result = "cancelled";
+            kept.meta = await setMetaState(kept.meta.path, "awaiting_review", { verification: { result: verification.result } });
+        }
         const result = outcome.result;
         return finish({
             provider: outcome.provider ?? null,
             model: result?.model ?? null,
             status: outcome.status,
+            ...(verification ? { verification } : {}),
             ...(result && !result.ok ? { errorType: result.error?.type ?? "NON_ZERO_EXIT" } : {}),
             output: result?.output ?? "",
             attempts: outcome.attempts,

@@ -39,6 +39,7 @@ export interface JobFile {
   task: string;
   sdd?: { slug: string; taskId: string };
   phase: string;
+  detail?: string;
   startedAt: string;
   lastProgress?: string;
 }
@@ -70,6 +71,8 @@ export interface RecentFile {
 }
 
 export interface Running {
+  phase?: string;
+  detail?: string;
   provider: string;
   mode: string;
   task: string;
@@ -275,7 +278,7 @@ export interface CardView {
   providers: ProviderView[];
   recent: RecentView[];
   last?: RecentView & { ago: string };
-  running?: { provider: string; mode: string; task: string; elapsed: string; spinner: string };
+  running?: { provider: string; mode: string; task: string; elapsed: string; spinner: string; phase?: string; detail?: string };
   /** Max values for the expanded bars, shared across providers. */
   maxCalls: number;
   maxTokens: number;
@@ -366,6 +369,8 @@ export function buildCard(input: {
   if (input.running) {
     const r = input.running;
     view.running = {
+      phase: r.phase,
+      detail: r.detail,
       provider: SHORT[r.provider] ?? r.provider,
       mode: r.mode,
       task: r.task,
@@ -483,10 +488,12 @@ export function pipelineView(features: PipelineFeature[], running?: Running | nu
 
 /** The delegation the server reports as running, for the card's "tocando" state and its hint line. */
 export function runningFromJobs(state: StateFile | null | undefined): Running | null {
-  const j = (state?.jobs ?? []).find((x) => x.phase === "running" || x.phase === "cancelled");
+  const j = (state?.jobs ?? []).find((x) => x.phase === "running" || x.phase === "verifying" || x.phase === "cancelled");
   if (!j) return null;
   const started = Date.parse(j.startedAt);
   return {
+    phase: j.phase,
+    detail: j.detail,
     provider: j.provider ?? "auto",
     mode: j.mode,
     task: (j.lastProgress ? `${j.task} — ${j.lastProgress}` : j.task).slice(0, 70),

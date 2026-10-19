@@ -5,6 +5,7 @@ import { repoRootOf } from "../git.js";
 import { PROVIDER_NAMES, type Mode, type ProviderName } from "../providers/types.js";
 import { resolveTaskRepo, workspaceRepos, type TaskRepo } from "../repo.js";
 import { makeReservationId, release, reserve } from "../reservations.js";
+import { verifyOutcome } from "../verify-commands.js";
 import { checkReferences, loadFeature, resolveTask, SddError, type SddFeature, type SddTask } from "./artifacts.js";
 import { acceptanceItems, ACCEPTANCE_VERDICTS, buildTaskBrief, type AcceptanceItem } from "./brief.js";
 import { checkDelegable, claimCommitted, commitCommand, notCommittedError, ownerValue, writeOwner } from "./claim.js";
@@ -118,7 +119,7 @@ function notesDraft(r: DelegateResponse, task: SddTask, verification: VerifyItem
   const vText = verify.length ? verify.map((v) => `\`${v.command}\` ${v.result}`).join(", ") : "not run";
   const gates = verification.filter((v) => v.kind === "gate");
   const gText = gates.length
-    ? gates.map((g) => `${g.gate} ${g.result === "pass" ? "ok" : g.result === "manual" ? "manual" : g.newFailure === true ? "NEW FAILURE" : "compare with baseline"}`).join(", ")
+    ? gates.map((g) => `${g.gate} ${g.result === "pass" ? "ok" : g.result === "manual" ? "manual" : g.result === "cancelled" ? "cancelled" : g.newFailure === true ? "NEW FAILURE" : "compare with baseline"}`).join(", ")
     : "none recorded";
   const met = acceptance.filter((a) => a.verdict === "met").length;
   return (
@@ -173,9 +174,11 @@ export async function sddTaskDelegate(
     const mode = args.mode ?? "write";
     const brief = buildTaskBrief(feature, task);
     const target: TaskRepo | undefined = task.repo ? await resolveTaskRepo(ctx.projectDir, feature.slug, task.repo) : undefined;
+    const repos = { ...(task.repo ? { repo: task.repo } : {}), workspaceRepos: await workspaceRepos(ctx.projectDir) };
     const r = await delegate(
       {
         provider,
+        verify: async (wt, signal, onCommand) => verifyOutcome(await verifyTask(wt, task, feature.gates, ctx.config.verify.timeoutMs, repos, { signal, onCommand }), signal),
         task: brief.task,
         files: brief.files,
         scopeFiles: task.files,
@@ -191,18 +194,11 @@ export async function sddTaskDelegate(
       ctx,
     );
 
-    // A cancelled worker's partial diff is not verified: the user asked it to stop.
-    const verification =
-      r.worktreePath && r.status === "success"
-        ? await verifyTask(r.worktreePath, task, feature.gates, ctx.config.verify.timeoutMs, {
-            ...(task.repo ? { repo: task.repo } : {}),
-            workspaceRepos: await workspaceRepos(ctx.projectDir),
-          })
-        : [];
+    const verification = r.verification?.items ?? [];
     const acceptance = parseAcceptance(r.output, acceptanceItems(feature, task));
     // Pipeline-only gates are read from CI later; anything else must have run and passed.
     const drift = (r.violations ?? []).flatMap((v) => (v.type === "outside_task_files" ? v.files : []));
-    const verified = drift.length === 0 && verification.length > 0 && verification.every((v) => v.result === "pass" || v.reason?.startsWith("pipeline-only"));
+    const verified = r.verification?.result !== "cancelled" && drift.length === 0 && verification.length > 0 && verification.every((v) => v.result === "pass" || v.reason?.startsWith("pipeline-only"));
     const sdd: SddDelegateResponse["sdd"] = {
       slug: feature.slug,
       taskId: task.id,

@@ -385,7 +385,7 @@ async function drawHeader($: EngineInterface, e: RenderInput<'AbovePrompt' | 'Pa
         <Box flexDirection="row" justifyContent="space-between">
           <Text color={STRONG} bold>{p.short}</Text>
           {isRunning && view.running ? (
-            <Text color={PALETTE.brass}>{`${view.running.spinner} tocando · ${view.running.mode} · ${view.running.elapsed}`}</Text>
+            <Text color={PALETTE.brass}>{`${view.running.spinner} ${view.running.phase === 'verifying' ? `verificando · ${view.running.detail ?? '…'}` : `tocando · ${view.running.mode}`} · ${view.running.elapsed}`}</Text>
           ) : (
             <Text color={color(p.tone)}>{p.badge}</Text>
           )}

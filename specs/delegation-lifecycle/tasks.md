@@ -114,8 +114,8 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 
 ## T5 — Verificación dentro del job, cancelable
 
-- [ ] Done
-- **Owner**: codex (multi-provider) since 2026-10-19
+- [x] Done
+- **Owner**: —
 - **Component**: C4 · **Implements**: R4, E3, E2
 - **Files**: `server/src/jobs.ts`, `server/src/delegate.ts`, `server/src/verify-commands.ts`, `server/src/hooks.ts`, `server/src/sdd/verify.ts`, `server/src/sdd/task-delegation.ts`, `server/src/index.ts`, `hooks/hooks.json`, `hooks/conductor/model.ts`, `hooks/conductor/card.tsx`, `types/index.d.ts`, `server/tests/jobs.spec.ts`, `server/tests/delegate.spec.ts`, `server/tests/hooks-setup.spec.ts`, `server/tests/sdd-task-delegation.spec.ts`, `server/tests/card-model.spec.ts`, `server/tests/fixtures/sleep.mjs`, `server/tests/sdd-verify.spec.ts`
 - **Do**:
@@ -139,7 +139,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
   - un job `lost` deja su worktree `recoverable` (E2);
   - el modelo de la card muestra la fase `verifying`.
 - **Verify**: `npm --prefix server test -- jobs delegate hooks-setup sdd-task-delegation card-model`
-- **Notes**: —
+- **Notes**: Delegada a codex (delegación `20261019005001-2321`, 3 min 23 s), revisada y aplicada por Claude sin cambios. `JobPhase` gana `verifying` y `JobRegistry.setPhase` guarda el comando en `detail` (y `worktreePath` en el snapshot). `runVerify`, `splitCommand` y `shellSyntax` se mueven a `server/src/verify-commands.ts` (movidos, no duplicados; `hooks.ts` y `sdd/verify.ts` los reexportan o importan) con `signal`/`onCommand`, y `verifyOutcome` resume `pass|fail|cancelled|none`. `delegate()` corre `params.verify` dentro del job tras un intento `ok` con cambios y deja la meta `awaiting_review` con `verification`; `index.ts` pasa `runVerify` y `sddTaskDelegate` pasa `verifyTask`, que ya no corre después. `postDelegate` formatea la `verification` de la respuesta y solo ejecuta comandos con un servidor anterior; `PostToolUse` baja a 30 s. E2: `reconcile` deja `recoverable` el worktree de un job `lost` en `running`/`verifying`. Card: fase `verifying` con el comando. Gates: typecheck 0 errores, 356 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: un `verify.commands` con sintaxis de shell pasa de ejecutarse partido en argv a quedar `manual` (más seguro, cambia el comportamiento: va en la documentación de T7)
 
 ## T6 — Hash del parche verificado y apply sin efectos parciales
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bar, buildCard, ctxBar, fmtClock, fmtCost, fmtDuration, fmtTokens, outcomeOf, ownerProvider, parseTasks, parseVerdict, pickActiveSpec, pipelineView, prettyModel, providerView, rateLimitText, rateLimitView, sparkline, specProgress } from "../../hooks/conductor/model.js";
+import { runningFromJobs, bar, buildCard, ctxBar, fmtClock, fmtCost, fmtDuration, fmtTokens, outcomeOf, ownerProvider, parseTasks, parseVerdict, pickActiveSpec, pipelineView, prettyModel, providerView, rateLimitText, rateLimitView, sparkline, specProgress } from "../../hooks/conductor/model.js";
 
 const NOW = Date.parse("2026-10-18T12:00:00Z");
 const TODAY = "2026-10-18";
@@ -66,6 +66,15 @@ describe("conductor card model", () => {
     expect(running.kind).toBe("running");
     expect(running.running).toMatchObject({ provider: "codex", elapsed: "00:42", spinner: "⠹" });
     expect(running.border).toBe("#E0A85A");
+  });
+
+  it("R4: verifying keeps the active card and exposes the command and clock", () => {
+    const state = { jobs: [{ id: "j", provider: "codex", mode: "write", task: "t",
+      phase: "verifying", detail: "npm test", startedAt: new Date(NOW - 42000).toISOString() }] };
+    const view = buildCard({ state, now: NOW, running: runningFromJobs(state) });
+    expect(view.kind).toBe("running");
+    expect(view.border).toBe("#E0A85A");
+    expect(view.running).toMatchObject({ phase: "verifying", detail: "npm test", elapsed: "00:42" });
   });
 
   it("strikes unavailable providers in the chain", () => {

@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { loadConfig } from "./config.js";
+import { runVerify } from "./verify-commands.js";
 import { delegate } from "./delegate.js";
 import { knownRepoDirs, RepoError } from "./repo.js";
 import { SddError } from "./sdd/artifacts.js";
@@ -34,7 +35,7 @@ export function createServer() {
     const store = new StateStore();
     const jobs = new JobRegistry(store);
     // E5: jobs a previous server left running in state.json are marked lost.
-    void jobs.reconcile();
+    const reconciled = jobs.reconcile();
     const server = new McpServer({ name: "multi-provider", version: VERSION });
     server.registerTool("delegate", {
         title: "Delegate a task to another AI CLI",
@@ -63,7 +64,7 @@ export function createServer() {
         try {
             const dir = projectDir();
             const { config } = await loadConfig(dir);
-            return json(await delegate(args, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs }));
+            return json(await delegate({ ...args, verify: (wt, signal, onCommand) => runVerify(wt, config, signal, onCommand) }, { projectDir: dir, config, store, instanceId, signal: extra.signal, jobs }));
         }
         catch (err) {
             return fail(err);
@@ -128,12 +129,13 @@ export function createServer() {
     server.registerTool("delegation_status", {
         title: "Delegations in progress",
         annotations: { readOnlyHint: true, openWorldHint: false },
-        description: "Read-only. The delegations this server is running (or one by id): provider, mode, phase, elapsed time, the worker's last progress lines " +
+        description: "Read-only. The delegations this server is running (or one by id): provider, mode, phase, current verification command (detail), elapsed time, the worker's last progress lines " +
             "(its own output, trimmed; never the prompt) and files changed so far. Also lists jobs lost when a previous server stopped (phase: lost). " +
             "Use it while a long delegate / sdd_task_delegate call runs in the background.",
         inputSchema: { id: z.string().min(1).optional().describe("Delegation id; omit for all") },
     }, async ({ id }) => {
         try {
+            await reconciled;
             const lost = ((await store.read()).jobs ?? []).filter((j) => j.phase === "lost" && (!id || j.id === id));
             return json({ jobs: await jobs.status(id), ...(lost.length ? { lost } : {}) });
         }
@@ -143,8 +145,8 @@ export function createServer() {
     });
     server.registerTool("delegation_cancel", {
         title: "Cancel a delegation",
-        description: "Stops a running delegation: kills the worker's process tree, tries no other provider and leaves the circuit breaker alone. " +
-            "Changes the worker already made stay in its worktree (the delegate call returns status cancelled with the diff).",
+        description: "Stops a running delegation: kills the worker or current verification process tree, skips remaining commands, tries no other provider and leaves the circuit breaker alone. " +
+            "Worker cancellation returns status cancelled with its diff. Verification cancellation leaves the worktree awaiting_review with verification.result cancelled.",
         inputSchema: { id: z.string().min(1).describe("Delegation id (from delegation_status)") },
     }, async ({ id }) => {
         try {

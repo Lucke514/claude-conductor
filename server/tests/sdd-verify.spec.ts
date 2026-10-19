@@ -1,10 +1,12 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { runVerify } from "../src/verify-commands.js";
 import { describe, expect, it } from "vitest";
 import type { QualityGate, SddTask } from "../src/sdd/artifacts.js";
 import { baselineIsClean, shellSyntax, verifyTask } from "../src/sdd/verify.js";
 import { parseTasks } from "../src/sdd/artifacts.js";
-import { tmpDir } from "./helpers.js";
+import { isAlive, testConfig, tmpDir } from "./helpers.js";
 
 const task = (verify: string[], text = verify.map((v) => `\`${v}\``).join(" · ")): SddTask => ({
   id: "T1",
@@ -84,6 +86,47 @@ describe("sdd verification", () => {
     expect(existsSync(dir)).toBe(true);
     const [manual] = await verifyTask(dir, task([], "revisión manual"), [], 30_000);
     expect(manual).toMatchObject({ result: "manual", command: "revisión manual" });
+  });
+
+  it("E3: an unavailable executable is a manual check", async () => {
+    const items = await verifyTask(tmpDir(), task(["missing-verifier-binary-xyz"]), [], 30000);
+    expect(items).toEqual([expect.objectContaining({ result: "manual", reason: expect.stringContaining("not found") })]);
+  });
+
+  it("an already cancelled signal starts neither Verify nor gates", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    expect(await verifyTask(tmpDir(), task(["node -e 'process.exit(0)'"]),
+      [gate("Tests", "node -e 'process.exit(0)'", "exit 0")], 30000, {}, { signal: controller.signal })).toEqual([]);
+  });
+
+  it.each(["configured", "sdd"] as const)("R4: %s verification kills the active process and skips the next check", async (kind) => {
+    const dir = tmpDir();
+    const pidFile = path.join(dir, "pid");
+    const marker = path.join(dir, "next");
+    const command = `node "${fileURLToPath(new URL("./fixtures/sleep.mjs", import.meta.url))}" 30 "${pidFile}"`;
+    const next = `node -e "require('fs').writeFileSync('next', 'ran')"`;
+    const controller = new AbortController();
+    const seen: string[] = [];
+    const onCommand = (c: string) => { seen.push(c); };
+    const pending = kind === "configured"
+      ? runVerify(dir, testConfig({ verify: { commands: [command, next] } }), controller.signal, onCommand).then(r => r.items)
+      : verifyTask(dir, task([command]), [gate("Tests", next, "exit 0")], 30000, {}, { signal: controller.signal, onCommand });
+    try {
+      for (let i = 0; i < 100 && !existsSync(pidFile); i++) await new Promise(r => setTimeout(r, 20));
+      expect(existsSync(pidFile)).toBe(true);
+      const start = Date.now();
+      controller.abort();
+      const items = await pending;
+      expect(Date.now() - start).toBeLessThan(5000);
+      expect(items).toEqual([expect.objectContaining({ result: "cancelled" })]);
+      expect(seen).toEqual([command]);
+      expect(existsSync(marker)).toBe(false);
+      expect(isAlive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
+    } finally {
+      controller.abort();
+      await pending;
+    }
   });
 
   it("only a baseline that records zero failures makes a failure new", () => {
