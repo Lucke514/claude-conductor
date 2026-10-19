@@ -3,7 +3,7 @@
 # Plan: Ciclo de vida seguro de las delegaciones
 
 > Spec: [spec.md](./spec.md)
-> Status: approved
+> Status: implemented
 > Last updated: 2026-10-18
 
 ## Approach

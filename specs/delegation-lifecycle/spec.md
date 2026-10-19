@@ -2,7 +2,7 @@
 
 # Spec: Ciclo de vida seguro de las delegaciones
 
-> Status: approved
+> Status: implemented
 > Owner: Lucas Gonzalez Espinosa (@Lucke514)
 > Sign-off: — the session's user holds all of these
 > Tracking: — this project tracks work in the repo only
@@ -72,6 +72,7 @@ En la sesión del 2026-10-18 se pidió a Codex, en modo read, una revisión cruz
 - 2026-10-18 Spec aprobado por el usuario.
 - 2026-10-18 Plan aprobado por el usuario; integración por merge local a `main`, como las features anteriores.
 - 2026-10-18 Tasks aprobadas por el usuario.
+- 2026-10-19 Verificación convergida (pass 1) y fusionado en `main` sin PR; el usuario pidió acelerar, así que la revisión cruzada queda como paso opcional antes del push.
 
 ## Open questions
 
