@@ -36,7 +36,17 @@ export interface LifecycleAuditEntry {
   to: LifecycleState;
 }
 
-export async function appendAudit(entry: AuditEntry | LifecycleAuditEntry, dir = logsDir()): Promise<void> {
+/** A `sdd_task_delegate` refused because another delegation holds the task (R7, R8). */
+export interface ReservationAuditEntry {
+  type: "TASK_IN_FLIGHT";
+  id: string;
+  callerId: string;
+  heldBy: string;
+  ts: string;
+  sdd: { slug: string; taskId: string };
+}
+
+export async function appendAudit(entry: AuditEntry | LifecycleAuditEntry | ReservationAuditEntry, dir = logsDir()): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
   await fs.appendFile(path.join(dir, `${today()}.jsonl`), `${JSON.stringify(entry)}\n`, { encoding: "utf8", mode: 0o600 });
 }

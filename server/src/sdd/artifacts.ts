@@ -61,12 +61,14 @@ export type SddErrorCode =
   | "NOT_APPROVED"
   | "TASK_CLOSED"
   | "TASK_CLAIMED"
-  | "CLAIM_NOT_COMMITTED";
+  | "CLAIM_NOT_COMMITTED"
+  | "TASK_IN_FLIGHT";
 
 export class SddError extends Error {
   constructor(
     readonly code: SddErrorCode,
     message: string,
+    readonly heldBy?: string,
   ) {
     super(message);
     this.name = "SddError";

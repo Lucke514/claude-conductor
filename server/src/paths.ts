@@ -10,6 +10,7 @@ export const statePath = (): string => path.join(mpHome(), "state.json");
 export const logsDir = (): string => path.join(mpHome(), "logs");
 export const patchesDir = (): string => path.join(mpHome(), "patches");
 export const worktreesDir = (): string => path.join(mpHome(), "worktrees");
+export const locksDir = (): string => path.join(mpHome(), "locks");
 
 /** User-level config (overrides the project one). Overridable via MP_USER_CONFIG. */
 export function userConfigPath(): string {

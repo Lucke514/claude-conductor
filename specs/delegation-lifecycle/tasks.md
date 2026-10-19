@@ -64,8 +64,8 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 
 ## T3 — Reserva exclusiva por tarea SDD
 
-- [ ] Done
-- **Owner**: antigravity (multi-provider) since 2026-10-19
+- [x] Done
+- **Owner**: —
 - **Component**: C6 · **Implements**: R7, E6, R8
 - **Files**: `server/src/reservations.ts`, `server/src/paths.ts`, `server/src/sdd/task-delegation.ts`, `server/src/sdd/artifacts.ts`, `server/tests/reservations.spec.ts`, `server/tests/sdd-task-delegation.spec.ts`
 - **Do**:
@@ -86,7 +86,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
   - un lock con el PID vivo pero más antiguo que `maxAgeMs` (reloj inyectado) se reemplaza con una nota;
   - `release` con otro id no borra el lock.
 - **Verify**: `npm --prefix server test -- reservations sdd-task-delegation`
-- **Notes**: —
+- **Notes**: Delegada a antigravity (delegación `20261019002037-31b643`, 24 min), revisada, corregida y aplicada por Claude. `locksDir()` en `paths.ts`; `reservations.ts` con `reserve` (`open(…, "wx")`, registro `{ key, id, pid, startedAt }`), `release` (solo con el mismo id) y `lockFilePath`; `SddError` gana `TASK_IN_FLIGHT` y `heldBy`; `sddTaskDelegate` reserva `<repoRoot>/<slug>/<taskId>` con `maxAgeMs = (timeoutMs ?? writeTimeoutMs) + verify.timeoutMs` tras `claimCommitted` y libera en un `finally`. Correcciones de Claude: (1) la toma de un lock huérfano sobrescribía el archivo con `writeFileAtomic`, y dos llamadas que veían el mismo huérfano ganaban las dos; ahora lo borra bajo `withLock` solo si el archivo sigue siendo ese huérfano y vuelve a competir por `wx` (test nuevo con dos `reserve` simultáneos); (2) la auditoría de `TASK_IN_FLIGHT` usaba `as never`: tipo `ReservationAuditEntry` en `audit.ts` (fuera de los `Files`); (3) quitada la opción `timeoutMs` sin uso y una línea en blanco doble. El worker también reconstruyó `server/dist` (drift fuera de los `Files`, de ahí `verified: false`); Claude lo regeneró. Gates: typecheck 0 errores, 344 passed, plugin validate ok, plugin test 12 pass. Clean-code: las tres correcciones de arriba · close calls: la clave usa la raíz del repo del proyecto y no la del `**Repo**` de la tarea; basta porque `<slug>/<taskId>` ya es único por proyecto
 
 ## T4 — Conservar cualquier write fallido con cambios
 
