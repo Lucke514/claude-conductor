@@ -41,7 +41,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 ## T2 — Limpieza que respeta el estado
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: codex (multi-provider) since 2026-10-19
 - **Component**: C2 · **Implements**: R1
 - **Files**: `server/src/worktree.ts`, `server/src/hooks.ts`, `server/src/index.ts`, `server/tests/delegate.spec.ts`, `server/tests/hooks-setup.spec.ts`
 - **Do**:
@@ -65,7 +65,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 ## T3 — Reserva exclusiva por tarea SDD
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: antigravity (multi-provider) since 2026-10-19
 - **Component**: C6 · **Implements**: R7, E6, R8
 - **Files**: `server/src/reservations.ts`, `server/src/paths.ts`, `server/src/sdd/task-delegation.ts`, `server/src/sdd/artifacts.ts`, `server/tests/reservations.spec.ts`, `server/tests/sdd-task-delegation.spec.ts`
 - **Do**:
