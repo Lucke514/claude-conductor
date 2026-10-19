@@ -200,3 +200,33 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 - Ninguno todavía.
 
 ## Verification reports
+
+### Verification report — delegation-lifecycle — 2026-10-19 — pass 1
+
+Change set: `main@0f0557d...HEAD` (`feature/delegation-lifecycle`)
+Converged: yes — sin gaps abiertos
+
+| Req | Verdict | Evidence (case · assertion · clause) |
+|---|---|---|
+| R1 | met | `delegate.spec.ts::"delegation-lifecycle cleanup > preserves protected states regardless of age…"` (`running`/`verifying`/`awaiting_review`/`recoverable` de 72 h en `kept`, solo `discardable` en `removed`, `force` borra los 5); `hooks-setup.spec.ts::"nested-repos R11/E5: SessionStart"` (SC1: un `awaiting_review` de 72 h sobrevive); `card-model.spec.ts` y `doctor.spec.ts` (aviso desde 7 días, Q1) |
+| R2 | met | `delegate.spec.ts::"uses updatedAt with a createdAt fallback regardless of directory mtime"` y el caso `recent` de la limpieza (`mtime` del directorio en 1970 y `updatedAt` reciente → se conserva) |
+| R3 | met | `delegate.spec.ts::"failed write fallback"` (`it.each(ERROR_TYPES)`: un intento, `partial`/`cancelled`, `errorType`, meta `recoverable`) y `"real CLI crash-write…"` (SC3: `fake-codex` sale con 3 tras escribir, un solo `mp/*`); `crash` sin cambios sigue cayendo en la cadena |
+| R4 | met | `jobs.spec.ts::"R4: verification stays in the job…"` (fase `verifying`, cancelación en < 5 s, sin procesos `sleep.mjs`; SC4); `sdd-task-delegation.spec.ts::"R4: SDD Verify runs in the job…"`; `hooks-setup.spec.ts` (el hook formatea `verification` sin ejecutar nada) |
+| R5 | met | `delegate.spec.ts::"SC2/R5: verify modifying files…"` (`verify_modified_files`, hash del worker → `PATCH_CHANGED` sin tocar el checkout, hash final aplica); `worktree-apply.spec.ts` (PATCH_CHANGED, sin hash → nota) |
+| R6 | met | `worktree-apply.spec.ts::"R6: conflict without allowConflicts…"` (checkout sin `<<<<<<<`, `git status` igual) y `"…with allowConflicts…"` (marcadores listados, `applied: true`) |
+| R7 | met | `sdd-task-delegation.spec.ts::"SC4/R7/R8: two simultaneous…"` (uno corre, el otro `TASK_IN_FLIGHT`, adapter llamado una vez) y `"R7: lock file is released…"`; `reservations.spec.ts` (7 casos, incluida la toma concurrente de un huérfano) |
+| R8 | met | `delegate.spec.ts::"creates running metadata and persists audited transitions without content"`; `worktree-apply.spec.ts::"R5/R8…"` (`PATCH_CHANGED` auditado); `sdd-task-delegation.spec.ts::"SC4/R7/R8…"` (`TASK_IN_FLIGHT` auditado) |
+| E1 | met | `delegate.spec.ts::"resolves legacy states…"` y `"classifies legacy changes…"`; `pendingWorktrees` usa la misma regla |
+| E2 | met | `jobs.spec.ts` (job `lost` en `running`/`verifying` → worktree `recoverable`) |
+| E3 | met | `delegate.spec.ts` (Verify con sintaxis de shell → `manual`, resultado `awaiting_review`); `sdd-verify.spec.ts` (comando inexistente → `manual`) |
+| E4 | met | `worktree-apply.spec.ts::"E4: corrupt patch returns git error without touching checkout"` |
+| E5 | met | `worktree-apply.spec.ts::"E5: expectedPatchSha256 with discarded worktree returns NOT_FOUND…"` |
+| E6 | met | `reservations.spec.ts` (PID muerto, PID vivo más antiguo que `maxAgeMs` con reloj inyectado, dos llamadas sobre el mismo huérfano: gana una) |
+
+Gates: typecheck ✅ exit 0 · tests ✅ `Test Files 25 passed (25) · Tests 367 passed (367)`, dos corridas seguidas (baseline 315; +52 nuevos, 0 omitidos) · `claude plugin validate .` ✅ · `claude plugin test .` ✅ `12 pass, 0 fail` · Dist ✅ reconstruido y sin diferencias · CI multiplataforma: en el push a `main` (merge sin PR, decisión del plan)
+Cross-review: no hecho en esta pasada — el usuario pidió acelerar; pendiente opcional antes del push (codex en modo read sobre `main@0f0557d...HEAD`)
+Dead-code sweep: `tsc --noUnusedLocals --noUnusedParameters` → 0
+Tests changed: `delegate.spec.ts` (dos casos de limpieza pasan a `force: true`; `nextSteps` de `STALLED` dice `failed (STALLED)`), `guardrails.spec.ts` (ignora la línea `lifecycle` del log de auditoría). Ninguno relaja una aserción de seguridad
+Success criteria: SC1–SC4 met by tests (fake CLIs y repos git temporales)
+Attribution: none
+Shortcuts declared: T6 se terminó a mano tras el corte de la llamada MCP (30 min sin respuesta de agy); T7 la hizo Claude sin delegar
