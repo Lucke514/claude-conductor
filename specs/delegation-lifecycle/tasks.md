@@ -144,9 +144,9 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 ## T6 — Hash del parche verificado y apply sin efectos parciales
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: codex (multi-provider) since 2026-10-19
 - **Component**: C5 · **Implements**: R5, R6, E4, E5, R8
-- **Files**: `server/src/worktree.ts`, `server/src/delegate.ts`, `server/src/index.ts`, `server/tests/delegate.spec.ts`, `server/tests/worktree-apply.spec.ts`, `skills/multi-provider/SKILL.md`, `agents/codex-worker.md`, `agents/agy-worker.md`, `commands/delegate.md`, `commands/sdd-delegate.md`
+- **Files**: `server/src/worktree.ts`, `server/src/delegate.ts`, `server/src/index.ts`, `server/src/audit.ts`, `server/tests/delegate.spec.ts`, `server/tests/worktree-apply.spec.ts`, `skills/multi-provider/SKILL.md`, `agents/codex-worker.md`, `agents/agy-worker.md`, `commands/delegate.md`, `commands/sdd-delegate.md`
 - **Do**:
   - Después de la verificación (T5), `delegate()` vuelve a ejecutar `collectChanges`. Si la lista de archivos o el contenido del diff cambió respecto del diff del worker, agrega `violations: [{ type: "verify_modified_files", detail, files }]` y devuelve el diff final.
   - Calcula `patchSha256` (SHA-256 del `patchFile` final), lo guarda en la meta (`awaiting_review`) y lo devuelve en la respuesta.
