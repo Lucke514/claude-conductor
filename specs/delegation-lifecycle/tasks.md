@@ -19,7 +19,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 ## T1 — Estado de ciclo de vida en la meta del worktree
 
 - [ ] Done
-- **Owner**: —
+- **Owner**: codex (multi-provider) since 2026-10-19
 - **Component**: C1 · **Implements**: R2, E1, R8
 - **Files**: `server/src/worktree.ts`, `server/src/audit.ts`, `server/tests/delegate.spec.ts`, `server/tests/helpers.ts`
 - **Do**:
