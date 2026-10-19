@@ -235,3 +235,13 @@ describe("provider-reliability R7: honest health", () => {
     expect(v.detail).toContain("aviso STALLED");
   });
 });
+
+describe("delegation-lifecycle: pending diffs on the card", () => {
+  it("shows nothing without pending diffs, a dim line under 7 days and a warning from 7 days on", () => {
+    const now = Date.parse("2026-10-19T12:00:00Z");
+    expect(buildCard({ state: {}, now }).pending).toBeUndefined();
+    expect(buildCard({ state: { pending: { count: 0, oldestDays: 0, at: "" } }, now }).pending).toBeUndefined();
+    expect(buildCard({ state: { pending: { count: 1, oldestDays: 2, at: "" } }, now }).pending).toEqual({ text: "1 diff pendiente de revisar o descartar", tone: "dim" });
+    expect(buildCard({ state: { pending: { count: 2, oldestDays: 9, at: "" } }, now }).pending).toEqual({ text: "⚠ 2 diffs pendientes · el más antiguo de hace 9 días", tone: "warn" });
+  });
+});

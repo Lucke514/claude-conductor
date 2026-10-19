@@ -171,7 +171,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 
 ## T7 — Card, doctor y documentación
 
-- [ ] Done
+- [x] Done
 - **Owner**: —
 - **Component**: C7 · **Implements**: R1 (aviso de 7 días)
 - **Files**: `hooks/conductor/model.ts`, `hooks/conductor/card.tsx`, `types/index.d.ts`, `server/src/state.ts`, `server/src/doctor.ts`, `server/tests/card-model.spec.ts`, `server/tests/doctor.spec.ts`, `tests/conductor-card.test.tsx`, `README.md`, `docs/delegation-lifecycle.md`, `docs/provider-reliability.md`
@@ -193,7 +193,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
   - `claude plugin test .` pasa;
   - la documentación nombra cada `R#` de la spec.
 - **Verify**: `npm --prefix server test -- card-model doctor`
-- **Notes**: —
+- **Notes**: Hecha por Claude (sin delegar, para ganar tiempo mientras T6 corría en agy). `server/src/pending.ts`: `pendingWorktrees` (`awaiting_review`/`recoverable`, E1 incluido), `pendingSummary` y `refreshPending`, que escribe `pending: { count, oldestDays, at }` en `state.json` en `SessionStart` y tras `delegate`, `sdd_task_delegate`, `delegation_apply`, `delegation_discard` y `delegation_cleanup` (`index.ts`, fuera de los `Files`). Card: `pendingView` en `model.ts` (línea tenue, o `⚠ … el más antiguo de hace N días` desde 7 días) bajo «últimas delegaciones»; el atajo 3 ya no dice «huérfanos». `/mp-doctor`: check `pending worktrees` (`pendingCheck`) con estado, edad y ruta, `warn` y `fix` desde 7 días. Docs: `docs/delegation-lifecycle.md` (R1–R8, E1–E6, Q1–Q3), sección y fila de Troubleshooting en el README, política de `partial` en `docs/provider-reliability.md` y la línea de la skill sobre la limpieza. Tests: 1 en `card-model.spec.ts`, 1 en `doctor.spec.ts`. Gates: typecheck 0 errores, 367 passed, plugin validate ok, plugin test 12 pass. Clean-code: none · close calls: no se agregó un test en `tests/conductor-card.test.tsx` — la línea se arma en `model.ts`, que ya está cubierto
 
 ## Gaps found in verification
 

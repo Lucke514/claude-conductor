@@ -46,7 +46,7 @@ Claude Code is always the **orchestrator and supervisor**. Workers (Codex via `c
      - Once applied with `git apply --3way` (no commit), **you** commit with the user's identity — no co-author or attribution lines.
    - **Request changes** → re-delegate with precise feedback, or fix it yourself in the worktree before applying.
    - **Discard** → `delegation_discard(worktreePath)`.
-5. `mp/*` branches are never merged; worktrees are removed on apply/discard (stale ones after 24 h).
+5. `mp/*` branches are never merged; worktrees are removed on apply/discard; cleanup only removes discardable ones (after 24 h) and never a diff awaiting review or recoverable.
 
 ## Nested repos (multi-repo workspaces)
 

@@ -2,9 +2,10 @@ import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { formatDoctor, mcpConfigCheck, runDoctor, workspaceChecks, type DoctorReport } from "../src/doctor.js";
+import { formatDoctor, mcpConfigCheck, pendingCheck, runDoctor, workspaceChecks, type DoctorReport } from "../src/doctor.js";
 import { StateStore } from "../src/state.js";
 import { FAKE_AGY, FAKE_CODEX, makeRepo, makeWorkspace, tmpDir } from "./helpers.js";
+import { createWorktree, removeWorktree, setMetaState } from "../src/worktree.js";
 
 function project(config: unknown = { providers: { codex: { binaryPath: FAKE_CODEX }, antigravity: { binaryPath: FAKE_AGY, usePty: false } } }): string {
   const dir = tmpDir("mp-doctor-proj-");
@@ -151,5 +152,26 @@ describe("mcp server config", () => {
     const dir = tmpDir("mp-doctor-plugin-");
     writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { mp: { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/server/bootstrap.mjs"] } } }));
     expect(mcpConfigCheck(dir)).toMatchObject({ level: "fail", detail: expect.stringContaining("not found") });
+  });
+});
+
+describe("delegation-lifecycle: pending worktrees in /mp-doctor", () => {
+  it("lists diffs awaiting review with their age and warns from 7 days on", async () => {
+    const repo = makeRepo();
+    const meta = await createWorktree({ cwd: repo, provider: "codex", includeUncommitted: false, symlink: [], id: "pending-doctor" });
+    try {
+      await setMetaState(meta.path, "awaiting_review");
+      const fresh = await pendingCheck(repo);
+      expect(fresh).toMatchObject({ name: "pending worktrees", level: "ok" });
+      expect(fresh.detail).toContain("awaiting_review 0d");
+      const later = await pendingCheck(repo, Date.now() + 9 * 86_400_000);
+      expect(later.level).toBe("warn");
+      expect(later.detail).toContain("awaiting_review 9d");
+      expect(later.fix).toContain("delegation_cleanup { force: true }");
+      await setMetaState(meta.path, "discardable");
+      expect((await pendingCheck(repo)).detail).toContain("none");
+    } finally {
+      await removeWorktree(meta);
+    }
   });
 });

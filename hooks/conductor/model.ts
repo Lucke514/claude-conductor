@@ -30,6 +30,8 @@ export interface StateFile {
   providers?: Partial<Record<ProviderName, ProviderStateFile>>;
   recent?: RecentFile[];
   jobs?: JobFile[];
+  /** delegation-lifecycle: diffs awaiting review or recoverable (server `refreshPending`). */
+  pending?: { count: number; oldestDays: number; at: string };
 }
 /** A delegation in flight, as the server's JobRegistry mirrors it. */
 export interface JobFile {
@@ -279,6 +281,8 @@ export interface CardView {
   recent: RecentView[];
   last?: RecentView & { ago: string };
   running?: { provider: string; mode: string; task: string; elapsed: string; spinner: string; phase?: string; detail?: string };
+  /** delegation-lifecycle: diffs awaiting review or recoverable; warn tone past 7 days (Q1). */
+  pending?: { text: string; tone: Tone };
   /** Max values for the expanded bars, shared across providers. */
   maxCalls: number;
   maxTokens: number;
@@ -364,6 +368,8 @@ export function buildCard(input: {
     maxTokens: Math.max(1, ...providers.map((p) => p.tokensToday)),
     maxDuration: Math.max(1, ...providers.map((p) => p.durationMsToday)),
   };
+  const pending = pendingView(state.pending);
+  if (pending) view.pending = pending;
   const first = (state.recent ?? [])[0];
   if (first && recent[0]) view.last = { ...recent[0], ago: fmtAgo(first.at, now) };
   if (input.running) {
@@ -379,6 +385,16 @@ export function buildCard(input: {
     };
   }
   return view;
+}
+
+export const PENDING_WARN_DAYS = 7;
+
+/** `⚠ 2 diffs pendientes · el más antiguo de hace 9 días`; nothing when none waits. */
+export function pendingView(p: StateFile["pending"]): { text: string; tone: Tone } | undefined {
+  if (!p || p.count <= 0) return undefined;
+  const n = `${p.count} diff${p.count === 1 ? "" : "s"} pendiente${p.count === 1 ? "" : "s"}`;
+  if (p.oldestDays >= PENDING_WARN_DAYS) return { text: `⚠ ${n} · el más antiguo de hace ${p.oldestDays} días`, tone: "warn" };
+  return { text: `${n} de revisar o descartar`, tone: "dim" };
 }
 
 /** Pulls VERDICT and an optional delegation id out of a worker agent's report. */

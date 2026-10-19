@@ -4,6 +4,7 @@ import { loadConfig, type MpConfig } from "./config.js";
 import { scrubCommand } from "./gh-scrub.js";
 import { checkHealth } from "./health.js";
 import { runVerify, type VerifyOutcome } from "./verify-commands.js";
+import { refreshPending } from "./pending.js";
 import { knownRepoDirs } from "./repo.js";
 import { StateStore } from "./state.js";
 import { assertManagedPath, cleanupWorktrees } from "./worktree.js";
@@ -204,6 +205,7 @@ export async function sessionStart(input: HookInput): Promise<HookOutput> {
     })
     .catch(() => undefined);
   await cleanupWorktrees(knownRepoDirs(dir, state?.repos), { maxAgeMs: 24 * 3600_000 }).catch(() => undefined);
+  await refreshPending(store, knownRepoDirs(dir, state?.repos));
   const statuses = await checkHealth(config, store).catch(() => []);
   if (statuses.some((s) => s.available)) return undefined;
   const detail = statuses

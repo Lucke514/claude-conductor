@@ -89,6 +89,8 @@ export interface MpState {
   jobs?: JobSnapshot[];
   /** Roots of the nested repos delegations have worked on (nested-repos R11): where to look for their mp/* worktrees. */
   repos?: string[];
+  /** delegation-lifecycle: diffs awaiting review or recoverable, for the card (R1, Q1). */
+  pending?: { count: number; oldestDays: number; at: string };
 }
 
 const MAX_SESSIONS = 30;

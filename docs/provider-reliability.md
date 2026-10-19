@@ -13,7 +13,7 @@ Hace que una delegación a Codex o Antigravity termine con el trabajo del worker
 - **Codex por `codex app-server`.** Usa JSON-RPC con eventos, igual que el plugin oficial de OpenAI, con fallback automático a `codex exec`.
 - **agy con `--output-format stream-json` y sin PTY.** En modo write no pide permisos.
 - **Dos límites de tiempo.** Uno por inactividad (`STALLED`) y otro total, más largo en write.
-- **Nada se pierde por un timeout.** Un write que se queda sin tiempo con cambios devuelve `partial` con su diff, en lugar de reintentar desde cero.
+- **Nada se pierde por un timeout ni por un error.** Desde `delegation-lifecycle` (R3), un write que termina con cualquier error después de cambiar archivos devuelve `partial` con su diff, en lugar de reintentar desde cero.
 - **Cancelar de verdad.** Se mata el árbol de procesos del worker, no se prueba otro proveedor y el circuit breaker no se toca.
 - **Delegaciones en curso visibles y cancelables** con `delegation_status` y `delegation_cancel`. La conductor card las muestra con su proveedor real y su último paso.
 - **`! inestable` solo** con 2 fallos seguidos atribuibles al proveedor.
@@ -36,7 +36,7 @@ La llamada `delegate` / `sdd_task_delegate` que estaba corriendo vuelve entonces
 
 | `status` | Cuándo | Qué trae |
 |---|---|---|
-| `partial` | Un write agotó el tiempo (`TIMEOUT`) o se quedó sin eventos (`STALLED`) **después de cambiar archivos**. No se reintenta ni se pasa a otro proveedor | `diff`, `worktreePath`, `patchFile` y pasos para aplicar, pedir el resto o descartar |
+| `partial` | Un write terminó con cualquier error (`TIMEOUT`, `STALLED`, `NON_ZERO_EXIT`…, ver [`delegation-lifecycle.md`](delegation-lifecycle.md)) **después de cambiar archivos**. No se reintenta ni se pasa a otro proveedor | `diff`, `worktreePath`, `patchFile` y pasos para aplicar, pedir el resto o descartar |
 | `cancelled` | Cancelación del cliente MCP o `delegation_cancel` | `diff` y `worktreePath` si había cambios; si no, nada |
 
 En `sdd_task_delegate`, `partial` y `cancelled` dejan el Owner reclamado y no corren el Verify. La respuesta nombra `sdd_task_release` por si quieres devolver la tarea.
