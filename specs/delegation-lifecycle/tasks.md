@@ -18,8 +18,8 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 
 ## T1 — Estado de ciclo de vida en la meta del worktree
 
-- [ ] Done
-- **Owner**: codex (multi-provider) since 2026-10-19
+- [x] Done
+- **Owner**: —
 - **Component**: C1 · **Implements**: R2, E1, R8
 - **Files**: `server/src/worktree.ts`, `server/src/audit.ts`, `server/tests/delegate.spec.ts`, `server/tests/helpers.ts`
 - **Do**:
@@ -36,7 +36,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
   - `worktreeAgeMs` ignora el `mtime` del directorio;
   - los tests existentes siguen pasando sin cambiarlos.
 - **Verify**: `npm --prefix server test -- delegate`
-- **Notes**: —
+- **Notes**: Delegada a codex (delegación `20261019000322-8428b1`), revisada y aplicada por Claude. `WorktreeMeta` gana `id`, `state`, `updatedAt`, `patchSha256` y `verification`; `createWorktree` escribe `state: "running"` con `writeFileAtomic`; `setMetaState` audita `{ type: "lifecycle", id, from, to }` sin contenido y exige un id (de `extra.id` o de la meta); `effectiveState` (E1) y `worktreeAgeMs` (`updatedAt ?? createdAt`). Sin reloj inyectable en los helpers: usa `new Date()`. 3 tests nuevos en `delegate.spec.ts` (uno fija el `mtime` del directorio en 1970). Gates: typecheck 0 errores, 318 passed (315 + 3), plugin validate ok, plugin test 12 pass. Clean-code: orden de imports y línea en blanco doble en el test, corregidos por Claude · close calls: `delegate()` todavía no pasa `id` a `createWorktree`; T4 debe hacerlo antes de llamar a `setMetaState`
 
 ## T2 — Limpieza que respeta el estado
 

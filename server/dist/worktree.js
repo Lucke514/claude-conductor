@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, promises as fs, realpathSync } from "node:fs";
 import path from "node:path";
+import { appendAudit } from "./audit.js";
+import { writeFileAtomic } from "./fsutil.js";
 import { git, gitOk, repoRootOf } from "./git.js";
 import { patchesDir, worktreesDir } from "./paths.js";
 import { isSensitivePath } from "./prompt-builder.js";
@@ -72,19 +74,23 @@ export async function createWorktree(opts) {
         await fs.symlink(src, dst, stat.isDirectory() ? (process.platform === "win32" ? "junction" : "dir") : "file");
         symlinks.push(rel);
     }
+    const now = new Date().toISOString();
     const meta = {
+        ...(opts.id ? { id: opts.id } : {}),
+        state: "running",
+        updatedAt: now,
         repoRoot,
         path: wtPath,
         branch,
         baseCommit: base,
         provider: opts.provider,
-        createdAt: new Date().toISOString(),
+        createdAt: now,
         hooksDir,
         symlinks,
         ...(skippedSymlinks.length ? { skippedSymlinks } : {}),
         ...(opts.sdd ? { sdd: opts.sdd } : {}),
     };
-    await fs.writeFile(path.join(gitDir, META_FILE), JSON.stringify(meta, null, 2));
+    await writeFileAtomic(path.join(gitDir, META_FILE), JSON.stringify(meta, null, 2));
     return meta;
 }
 /**
@@ -121,6 +127,27 @@ export async function readMeta(worktreePath) {
     const gitDir = await gitOk(["rev-parse", "--absolute-git-dir"], worktreePath);
     const raw = await fs.readFile(path.join(gitDir, META_FILE), "utf8");
     return JSON.parse(raw);
+}
+/** Persist lifecycle metadata and audit only the delegation id and state transition. */
+export async function setMetaState(worktreePath, state, extra = {}) {
+    const meta = await readMeta(worktreePath);
+    const id = extra.id ?? meta.id;
+    if (!id)
+        throw new Error("a delegation id is required to audit a lifecycle transition");
+    const updatedAt = new Date().toISOString();
+    const next = { ...meta, ...extra, id, state, updatedAt };
+    const gitDir = await gitOk(["rev-parse", "--absolute-git-dir"], worktreePath);
+    await writeFileAtomic(path.join(gitDir, META_FILE), JSON.stringify(next, null, 2));
+    await appendAudit({ type: "lifecycle", id, ts: updatedAt, from: meta.state ?? null, to: state });
+    return next;
+}
+/** Legacy worktrees with changes must be kept for review. */
+export function effectiveState(meta, hasChanges) {
+    return meta.state ?? (hasChanges ? "awaiting_review" : "discardable");
+}
+/** Age since the last metadata update, independent of directory timestamps. */
+export function worktreeAgeMs(meta, now = Date.now()) {
+    return now - Date.parse(meta.updatedAt ?? meta.createdAt);
 }
 /**
  * Canonical form for comparing paths: resolves symlinks (macOS lists /var as /private/var)

@@ -1,12 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { delegate } from "../src/delegate.js";
 import { logsDir } from "../src/paths.js";
 import { StateStore } from "../src/state.js";
 import { knownRepoDirs } from "../src/repo.js";
-import { applyWorktree, cleanupWorktrees, listWorktrees, readMeta, removeWorktree } from "../src/worktree.js";
+import { applyWorktree, cleanupWorktrees, createWorktree, effectiveState, listWorktrees, readMeta, removeWorktree, setMetaState, worktreeAgeMs } from "../src/worktree.js";
 import type { ProviderAdapter, ProviderName } from "../src/providers/types.js";
 import { FAKE_CODEX, isAlive, makeRepo, makeWorkspace, testConfig, tmpDir } from "./helpers.js";
 
@@ -661,5 +661,56 @@ describe("gitConfigEnv", () => {
     const hooks: [string, string][] = [["core.hooksPath", "/h"]];
     expect(gitConfigEnv(hooks, { GIT_CONFIG_COUNT: "3" })).toEqual({ GIT_CONFIG_COUNT: "4", GIT_CONFIG_KEY_3: "core.hooksPath", GIT_CONFIG_VALUE_3: "/h" });
     expect(gitConfigEnv(hooks, {})).toEqual({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: "/h" });
+  });
+});
+
+describe("delegation-lifecycle metadata", () => {
+  it("creates running metadata and persists audited transitions without content", async () => {
+    const meta = await createWorktree({ cwd: makeRepo(), provider: "codex", includeUncommitted: false, symlink: [], id: "lifecycle-test" });
+    try {
+      expect(await readMeta(meta.path)).toEqual(meta);
+      expect(meta.state).toBe("running");
+      expect(meta.updatedAt).toBe(meta.createdAt);
+      const before = Date.now();
+      const extra = { patchSha256: "a".repeat(64), verification: { result: "pass" as const, modifiedFiles: ["private-file.ts"] } };
+      const updated = await setMetaState(meta.path, "verifying", extra);
+      expect(Date.parse(updated.updatedAt!)).toBeGreaterThanOrEqual(before);
+      expect(updated).toMatchObject({ ...meta, ...extra, state: "verifying", updatedAt: expect.any(String) });
+      expect(await readMeta(meta.path)).toEqual(updated);
+      await setMetaState(meta.path, "awaiting_review");
+      const entries = readdirSync(logsDir()).flatMap((f) => readFileSync(path.join(logsDir(), f), "utf8").trim().split("\n").map((l) => JSON.parse(l)))
+        .filter((e) => e.id === "lifecycle-test");
+      expect(entries).toEqual([
+        { type: "lifecycle", id: meta.id, ts: updated.updatedAt, from: "running", to: "verifying" },
+        { type: "lifecycle", id: meta.id, ts: expect.any(String), from: "verifying", to: "awaiting_review" },
+      ]);
+    } finally {
+      await removeWorktree(meta);
+    }
+  });
+
+  it("resolves legacy states and honors every explicit state", () => {
+    expect(effectiveState({}, true)).toBe("awaiting_review");
+    expect(effectiveState({}, false)).toBe("discardable");
+    for (const state of ["running", "verifying", "awaiting_review", "recoverable", "discardable"] as const) {
+      expect(effectiveState({ state }, true)).toBe(state);
+      expect(effectiveState({ state }, false)).toBe(state);
+    }
+  });
+
+  it("uses updatedAt with a createdAt fallback regardless of directory mtime", async () => {
+    const meta = await createWorktree({ cwd: makeRepo(), provider: "codex", includeUncommitted: false, symlink: [] });
+    try {
+      const now = Date.parse(meta.createdAt) + 1000;
+      utimesSync(meta.path, new Date(0), new Date(0));
+      expect(worktreeAgeMs(await readMeta(meta.path), now)).toBe(1000);
+      expect(worktreeAgeMs({ createdAt: new Date(0).toISOString(), updatedAt: meta.updatedAt }, now)).toBe(1000);
+      expect(worktreeAgeMs({ createdAt: meta.createdAt }, now)).toBe(1000);
+      await expect(setMetaState(meta.path, "recoverable")).rejects.toThrow(/delegation id/);
+      expect(await readMeta(meta.path)).toEqual(meta);
+      expect((await setMetaState(meta.path, "recoverable", { id: "legacy-id" })).id).toBe("legacy-id");
+    } finally {
+      await removeWorktree(meta);
+    }
   });
 });
