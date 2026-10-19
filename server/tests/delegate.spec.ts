@@ -1,4 +1,9 @@
+for (const k of Object.keys(process.env)) {
+  if (k.startsWith("GIT_CONFIG_")) delete process.env[k];
+}
+
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -81,12 +86,66 @@ describe("delegate (integration with fake CLIs)", () => {
     expect((await readMeta(r.worktreePath!)).state).toBe("awaiting_review");
     expect(existsSync(path.join(repo, "added-by-worker.txt"))).toBe(false);
 
-    const applied = await applyWorktree(r.worktreePath!, "t1");
+    expect(r.patchSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect((await readMeta(r.worktreePath!)).patchSha256).toBe(r.patchSha256);
+
+    const applied = await applyWorktree(r.worktreePath!, "t1", { expectedPatchSha256: r.patchSha256 });
     expect(applied.applied).toBe(true);
     expect(readFileSync(path.join(repo, "added-by-worker.txt"), "utf8")).toBe("hello from worker\n");
     expect(git(repo, "rev-parse", "HEAD")).toBe(headBefore); // nothing committed
     expect(git(repo, "branch", "--list", "mp/*")).toBe("");
     expect(existsSync(r.worktreePath!)).toBe(false);
+  });
+
+  it("SC2/R5: verify modifying files reports verify_modified_files, updates patchSha256; apply with worker hash returns PATCH_CHANGED; apply with final hash applies", async () => {
+    const repo = makeRepo();
+    process.env.FAKE_MODE = "write";
+    const c = ctx(repo);
+    let workerHash = "";
+    const r = await delegate(
+      {
+        provider: "codex",
+        task: "add a file",
+        mode: "write",
+        verify: async (wtPath) => {
+          // Capture worker diff before verification modifies the file
+          const workerPatch = execFileSync("git", ["diff", "HEAD", "added-by-worker.txt"], { cwd: wtPath, encoding: "utf8" });
+          workerHash = createHash("sha256").update(workerPatch).digest("hex");
+          // Verification (e.g. linter/formatter) modifies the file
+          writeFileSync(path.join(wtPath, "added-by-worker.txt"), "hello from worker formatted by verify\n");
+          return { result: "pass", items: [{ kind: "verify", command: "format", result: "pass" }] };
+        },
+      },
+      c,
+    );
+
+    expect(r.status).toBe("success");
+    expect(r.violations).toEqual([
+      expect.objectContaining({
+        type: "verify_modified_files",
+        files: ["added-by-worker.txt"],
+      }),
+    ]);
+    expect(r.diff).toContain("+hello from worker formatted by verify");
+    expect(r.patchSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(r.patchSha256).not.toBe(workerHash);
+
+    const meta = await readMeta(r.worktreePath!);
+    expect(meta.patchSha256).toBe(r.patchSha256);
+    expect(meta.verification?.modifiedFiles).toEqual(["added-by-worker.txt"]);
+
+    // Applying with the pre-verification worker hash returns PATCH_CHANGED and does not touch checkout
+    const statusBefore = git(repo, "status", "--porcelain");
+    const changed = await applyWorktree(r.worktreePath!, "sc2-wrong", { expectedPatchSha256: workerHash });
+    expect(changed.applied).toBe(false);
+    expect(changed.code).toBe("PATCH_CHANGED");
+    expect(changed.patchSha256).toBe(r.patchSha256);
+    expect(git(repo, "status", "--porcelain")).toBe(statusBefore);
+
+    // Applying with the final verified hash succeeds
+    const applied = await applyWorktree(r.worktreePath!, "sc2-ok", { expectedPatchSha256: r.patchSha256 });
+    expect(applied.applied).toBe(true);
+    expect(readFileSync(path.join(repo, "added-by-worker.txt"), "utf8")).toBe("hello from worker formatted by verify\n");
   });
 
   it("E3: shell syntax and unavailable commands are manual and await review", async () => {

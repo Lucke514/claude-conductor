@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { appendAudit } from "./audit.js";
 import type { MpConfig } from "./config.js";
 import { chainFor, resolveOrder, routeTask, runChain, type Attempt, type ChainEntry } from "./fallback.js";
-import { repoRootOf } from "./git.js";
+import { gitOk, repoRootOf } from "./git.js";
 import { makeAdapters, makeBreaker } from "./health.js";
 import { buildPrompt, type FileReport } from "./prompt-builder.js";
 import { PROVIDER_NAMES, type ErrorType, type Mode, type ProviderAdapter, type ProviderName, type ProviderResult, type TokenUsage } from "./providers/types.js";
@@ -13,7 +13,7 @@ import type { JobRegistry } from "./jobs.js";
 import { checkRemotePush, type PushViolation } from "./remote-check.js";
 import type { VerifyOutcome } from "./verify-commands.js";
 import { ensureShims, workerEnv } from "./worker-env.js";
-import { collectChanges, createWorktree, removeWorktree, setMetaState, type Changes, type Violation, type WorktreeMeta } from "./worktree.js";
+import { collectChanges, createWorktree, patchSha256, removeWorktree, setMetaState, type Changes, type Violation, type WorktreeMeta } from "./worktree.js";
 
 export interface DelegateParams {
   /** Internal verification, kept inside the cancellable job. */
@@ -57,6 +57,7 @@ export interface DelegateResponse {
   diff?: string;
   diffTruncated?: boolean;
   patchFile?: string;
+  patchSha256?: string;
   filesChanged?: string[];
   worktreePath?: string;
   branch?: string;
@@ -253,7 +254,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
         const keep = changes.files.length > 0;
         lastHadChanges = mode === "write" && changes.files.length > 0;
         if (mode === "write" && keep) {
-          meta = await setMetaState(meta.path, result.ok ? "verifying" : "recoverable");
+          meta = await setMetaState(meta.path, result.ok ? "verifying" : "recoverable", { patchSha256: await patchSha256(changes) });
           kept = { meta, changes };
         } else {
           await removeWorktree(meta).catch(() => undefined);
@@ -294,11 +295,43 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
     let verification: VerifyOutcome | undefined;
     if (kept && outcome.result?.ok) {
       ctx.jobs?.setPhase(id, "verifying");
+      const treeBefore = (await gitOk(["write-tree"], kept.meta.path)).trim();
+      const workerFiles = [...kept.changes.files];
       verification = params.verify
         ? await params.verify(kept.meta.path, signal, command => ctx.jobs?.setPhase(id, "verifying", command))
         : { result: signal.aborted ? "cancelled" : "none", items: [] };
       if (signal.aborted) verification.result = "cancelled";
-      kept.meta = await setMetaState(kept.meta.path, "awaiting_review", { verification: { result: verification.result } });
+
+      const finalChanges = await collectChanges(kept.meta, config.defaults.maxDiffBytes, `${id}-verified`);
+      const treeAfter = (await gitOk(["write-tree"], kept.meta.path)).trim();
+
+      let modifiedFiles: string[] = [];
+      if (treeBefore !== treeAfter || kept.changes.diff !== finalChanges.diff) {
+        if (treeBefore !== treeAfter) {
+          modifiedFiles = (await gitOk(["diff", "--name-only", treeBefore, treeAfter], kept.meta.path))
+            .split(/\r?\n/)
+            .filter(Boolean);
+        }
+        if (modifiedFiles.length === 0) {
+          const s = new Set([...workerFiles, ...finalChanges.files]);
+          modifiedFiles = [...s];
+        }
+        violations.push({
+          type: "verify_modified_files",
+          detail: `verification modified ${modifiedFiles.length} file(s): ${modifiedFiles.slice(0, 10).join(", ")}`,
+          files: modifiedFiles,
+        });
+      }
+
+      kept.changes = finalChanges;
+
+      kept.meta = await setMetaState(kept.meta.path, "awaiting_review", {
+        patchSha256: await patchSha256(finalChanges),
+        verification: {
+          result: verification.result,
+          ...(modifiedFiles.length ? { modifiedFiles } : {}),
+        },
+      });
     }
     const result = outcome.result;
     return finish({
@@ -341,6 +374,7 @@ export async function delegate(params: DelegateParams, ctx: DelegateContext): Pr
         response.worktreePath = kept.meta.path;
         response.branch = kept.meta.branch;
         if (kept.changes.patchFile) response.patchFile = kept.changes.patchFile;
+        if (kept.meta.patchSha256) response.patchSha256 = kept.meta.patchSha256;
       }
       if (violations.length > 0) response.violations = violations;
       if (notes.length > 0) response.notes = notes;

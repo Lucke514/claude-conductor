@@ -190,11 +190,13 @@ export class JobRegistry {
     const now = Date.now();
     if (!force && now - job.persistedAt < PERSIST_EVERY_MS) return;
     job.persistedAt = now;
-    const snapshot = { ...job.info };
+    const id = job.info.id;
     await this.store.update((s) => {
       // A write queued before finish() must not bring a finished job back.
-      if (!this.jobs.has(snapshot.id)) return;
-      s.jobs = [...(s.jobs ?? []).filter((j) => j.id !== snapshot.id), snapshot];
+      if (!this.jobs.has(id)) return;
+      // The lock does not keep call order: write the job as it is now, so an older write
+      // that lands last cannot roll back a newer phase or detail.
+      s.jobs = [...(s.jobs ?? []).filter((j) => j.id !== id), { ...job.info }];
     }).catch(() => undefined);
   }
 }

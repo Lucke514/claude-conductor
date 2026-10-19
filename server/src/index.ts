@@ -122,13 +122,19 @@ export function createServer(): McpServer {
       title: "Apply a delegated diff",
       description:
         "Apply the current changes of a delegation worktree to the user's checkout with `git apply --3way` (no commit), " +
-        "then delete the worktree and its mp/* branch. Only call after reviewing and verifying the diff. You commit afterwards.",
-      inputSchema: { worktreePath: z.string().min(1) },
+        "then delete the worktree and its mp/* branch. Only call after reviewing and verifying the diff. You commit afterwards. " +
+        "Pass expectedPatchSha256 to ensure applying only what was reviewed (fails with PATCH_CHANGED if changed). " +
+        "If conflicts occur, checkout stays untouched unless allowConflicts: true is passed.",
+      inputSchema: {
+        worktreePath: z.string().min(1).describe("Worktree path to apply"),
+        expectedPatchSha256: z.string().optional().describe("SHA-256 of the reviewed patch. If the diff changed, returns PATCH_CHANGED and applies nothing"),
+        allowConflicts: z.boolean().optional().describe("Apply with 3-way conflict markers if the patch does not apply cleanly (lists conflicted files)"),
+      },
     },
-    async ({ worktreePath }) => {
+    async ({ worktreePath, expectedPatchSha256, allowConflicts }) => {
       try {
         const id = `${Date.now()}-${randomBytes(3).toString("hex")}`;
-        return json(await applyWorktree(worktreePath, id));
+        return json(await applyWorktree(worktreePath, id, { expectedPatchSha256, allowConflicts }));
       } catch (err) {
         return fail(err);
       }

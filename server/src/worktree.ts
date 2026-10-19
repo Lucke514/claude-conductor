@@ -43,7 +43,8 @@ export interface WorktreeMeta {
 
 export type Violation =
   | { type: "worker_commit"; detail: string; headBefore: string; headAfter: string }
-  | { type: "specs_modified"; detail: string; files: string[] };
+  | { type: "specs_modified"; detail: string; files: string[] }
+  | { type: "verify_modified_files"; detail: string; files: string[] };
 
 export interface Changes {
   diff: string;
@@ -225,6 +226,18 @@ export function realOrResolved(p: string): string {
   try {
     return realpathSync.native(p);
   } catch {
+    let cur = path.resolve(p);
+    const tails: string[] = [];
+    while (cur && cur !== path.dirname(cur)) {
+      tails.unshift(path.basename(cur));
+      cur = path.dirname(cur);
+      try {
+        const resolved = realpathSync.native(cur);
+        return path.join(resolved, ...tails);
+      } catch {
+        // walk up until an existing directory is found
+      }
+    }
     return path.resolve(p);
   }
 }
@@ -314,31 +327,101 @@ export async function removeWorktree(meta: Pick<WorktreeMeta, "repoRoot" | "path
   if (meta.branch.startsWith("mp/")) await git(["branch", "-D", meta.branch], meta.repoRoot);
 }
 
-/**
- * Apply the worktree's current changes to the user's checkout with
- * `git apply --3way` (no commit — Claude commits with the user's identity),
- * then remove the worktree and its mp/* branch.
- */
-export async function applyWorktree(worktreePath: string, id: string): Promise<{ applied: boolean; files: string[]; output: string; patchFile?: string }> {
-  const meta = await readMeta(worktreePath);
-  const changes = await collectChanges(meta, Number.MAX_SAFE_INTEGER, `${id}-apply`);
-  if (!changes.diff) {
-    await removeWorktree(meta);
-    return { applied: false, files: [], output: "no changes to apply" };
+export interface ApplyOptions {
+  expectedPatchSha256?: string;
+  allowConflicts?: boolean;
+}
+
+export interface ApplyResult {
+  applied: boolean;
+  code?: "PATCH_CHANGED" | "NOT_FOUND";
+  patchSha256?: string;
+  conflicts?: string[];
+  files: string[];
+  output: string;
+  patchFile?: string;
+  notes?: string[];
+}
+
+export function parseConflicts(output: string, knownFiles: string[]): string[] {
+  const conflicts = new Set<string>();
+  for (const m of output.matchAll(/Applied patch to '([^']+)' with conflicts\./g)) {
+    if (m[1]) conflicts.add(m[1]);
   }
-  let r = await git(["apply", "--3way", "--whitespace=nowarn", changes.patchFile!], meta.repoRoot);
+  for (const m of output.matchAll(/error: (?:patch failed: )?([^:]+):/g)) {
+    const file = m[1]?.trim();
+    if (file && knownFiles.includes(file)) {
+      conflicts.add(file);
+    }
+  }
+  return [...conflicts].sort();
+}
+
+/** SHA-256 of a delegation's full patch: what Claude reviewed and what `delegation_apply` checks (R5). */
+export async function patchSha256(changes: Pick<Changes, "diff" | "patchFile">): Promise<string> {
+  return createHash("sha256").update(changes.patchFile ? await fs.readFile(changes.patchFile) : changes.diff).digest("hex");
+}
+
+/** `git apply --3way`, retried without it when unstaged local edits make the index check fail. */
+async function gitApply(patchFile: string, repoRoot: string): Promise<{ code: number; output: string }> {
+  let r = await git(["apply", "--3way", "--whitespace=nowarn", patchFile], repoRoot);
   let output = `${r.stdout}${r.stderr}`.trim();
   if (r.code !== 0 && /does not match index|already exists in index/i.test(output)) {
     // --3way implies --index; with unstaged local edits fall back to a working-tree-only apply.
-    r = await git(["apply", "--whitespace=nowarn", changes.patchFile!], meta.repoRoot);
+    r = await git(["apply", "--whitespace=nowarn", patchFile], repoRoot);
     output = `${output}\n(retried without --3way) ${r.stdout}${r.stderr}`.trim();
   }
-  if (r.code !== 0) {
-    // Leave the worktree in place so the conflict can be inspected.
-    return { applied: false, files: changes.files, output, ...(changes.patchFile ? { patchFile: changes.patchFile } : {}) };
+  return { code: r.code, output };
+}
+
+/**
+ * Apply the worktree's current changes to the user's checkout (no commit — Claude commits
+ * with the user's identity), then remove the worktree and its mp/* branch.
+ *
+ * R5: with `expectedPatchSha256`, a diff that changed since the review is refused (PATCH_CHANGED).
+ * R6: the checkout is only touched once a check passes. `git apply --3way --check` exits 0 even
+ * with conflicts, so they are read from its output (LC_ALL=C); unparseable output counts as one (E4).
+ */
+export async function applyWorktree(worktreePath: string, id: string, opts: ApplyOptions = {}): Promise<ApplyResult> {
+  assertManagedPath(worktreePath);
+  const meta = existsSync(worktreePath) ? await readMeta(worktreePath).catch(() => undefined) : undefined;
+  if (!meta) return { applied: false, code: "NOT_FOUND", files: [], output: `no delegation worktree at ${worktreePath} (already applied or discarded?)` };
+
+  const changes = await collectChanges(meta, Number.MAX_SAFE_INTEGER, `${id}-apply`);
+  const sha = await patchSha256(changes);
+  const base = { files: changes.files, ...(changes.patchFile ? { patchFile: changes.patchFile } : {}) };
+  if (opts.expectedPatchSha256 && opts.expectedPatchSha256 !== sha) {
+    await appendAudit({ type: "PATCH_CHANGED", id: meta.id ?? id, ts: new Date().toISOString() });
+    return { applied: false, code: "PATCH_CHANGED", patchSha256: sha, output: `the diff changed since it was reviewed (now ${sha}): review it again`, ...base };
   }
+  const notes = opts.expectedPatchSha256 ? [] : ["applied without expectedPatchSha256: nothing checked that this is the diff that was reviewed"];
+  const withNotes = notes.length ? { notes } : {};
+  if (!changes.diff) {
+    await removeWorktree(meta);
+    return { applied: false, files: [], output: "no changes to apply", ...withNotes };
+  }
+
+  const patch = changes.patchFile!;
+  const env = { ...process.env, LC_ALL: "C" };
+  let conflicts: string[] = [];
+  if ((await git(["apply", "--check", patch], meta.repoRoot, env)).code !== 0) {
+    const check = await git(["apply", "--3way", "--check", patch], meta.repoRoot, env);
+    const output = `${check.stdout}${check.stderr}`.trim();
+    conflicts = parseConflicts(output, changes.files);
+    // E4: a failure that names no conflicted file (corrupt patch, unknown output) never touches the checkout.
+    if (conflicts.length === 0 && (check.code !== 0 || /error:/i.test(output))) return { applied: false, output, ...base, ...withNotes };
+    if (conflicts.length > 0 && !opts.allowConflicts) {
+      return { applied: false, conflicts, output: `${output}\nthe checkout was not touched; pass allowConflicts: true to apply with conflict markers`, ...base, ...withNotes };
+    }
+  }
+  const r = await gitApply(patch, meta.repoRoot);
+  if (conflicts.length > 0) {
+    // Applied with markers (git exits non-zero): keep the worktree so the original diff stays inspectable.
+    return { applied: true, conflicts, output: r.output, ...base, ...withNotes };
+  }
+  if (r.code !== 0) return { applied: false, output: r.output, ...base, ...withNotes };
   await removeWorktree(meta);
-  return { applied: true, files: changes.files, output, ...(changes.patchFile ? { patchFile: changes.patchFile } : {}) };
+  return { applied: true, output: r.output, ...base, ...withNotes };
 }
 
 /** Files the worker has changed so far, read-only (no staging): for delegation_status while it runs. */

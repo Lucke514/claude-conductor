@@ -40,7 +40,10 @@ Claude Code is always the **orchestrator and supervisor**. Workers (Codex via `c
 2. **Verify every claim** against the real code (Read/Grep). Never accept unverified output.
 3. With a diff: review it fully; lint/tests run automatically in the worktree when `verify.commands` is configured (PostToolUse hook) — read that report, and run them yourself otherwise.
 4. Decide:
-   - **Accept** → `delegation_apply(worktreePath)` applies the diff to the user's branch with `git apply --3way` (no commit), then **you** commit with the user's identity — no co-author or attribution lines.
+   - **Accept** → call `delegation_apply(worktreePath, expectedPatchSha256)` passing the `patchSha256` you reviewed. It checks the patch before touching the checkout:
+     - If it returns `PATCH_CHANGED`, the diff changed after review: re-review the diff before re-applying with the new hash.
+     - If it returns `conflicts`, the checkout is intact: warn the user and inspect `patchFile`. If the user chooses to apply with conflict markers to resolve them in the checkout, call `delegation_apply` with `allowConflicts: true` (and `expectedPatchSha256`).
+     - Once applied with `git apply --3way` (no commit), **you** commit with the user's identity — no co-author or attribution lines.
    - **Request changes** → re-delegate with precise feedback, or fix it yourself in the worktree before applying.
    - **Discard** → `delegation_discard(worktreePath)`.
 5. `mp/*` branches are never merged; worktrees are removed on apply/discard (stale ones after 24 h).

@@ -143,8 +143,8 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
 
 ## T6 — Hash del parche verificado y apply sin efectos parciales
 
-- [ ] Done
-- **Owner**: codex (multi-provider) since 2026-10-19
+- [x] Done
+- **Owner**: —
 - **Component**: C5 · **Implements**: R5, R6, E4, E5, R8
 - **Files**: `server/src/worktree.ts`, `server/src/delegate.ts`, `server/src/index.ts`, `server/src/audit.ts`, `server/tests/delegate.spec.ts`, `server/tests/worktree-apply.spec.ts`, `skills/multi-provider/SKILL.md`, `agents/codex-worker.md`, `agents/agy-worker.md`, `commands/delegate.md`, `commands/sdd-delegate.md`
 - **Do**:
@@ -167,7 +167,7 @@ Orden: T1 → (T2 ∥ T3) → T4 → T5 → T6 → T7. T2 y T3 no comparten arch
   - sobre un worktree descartado devuelve `NOT_FOUND` (E5);
   - el log de auditoría tiene el `PATCH_CHANGED` sin contenido.
 - **Verify**: `npm --prefix server test -- worktree-apply delegate`
-- **Notes**: —
+- **Notes**: Reclamada para codex; la cadena pasó a antigravity (delegación `20261019005629-ccfd8e`). Tras 30 min sin respuesta, Claude Code abortó la llamada MCP, pero el proceso de agy siguió vivo: Claude guardó el diff del worktree, canceló el job con `delegation_cancel` y terminó la tarea a mano. `patchSha256(changes)` en `worktree.ts` (SHA-256 del `patchFile`) lo usan `delegate()` (meta `verifying`/`recoverable` y, tras la verificación, `awaiting_review` con el hash final) y `applyWorktree`; tras verificar, `delegate()` recalcula el diff y marca `verify_modified_files` (vía `git write-tree` antes y después). `applyWorktree(path, id, { expectedPatchSha256, allowConflicts })`: `NOT_FOUND` (E5), `PATCH_CHANGED` auditado (R8), `git apply --check` estricto y, si falla, `--3way --check` con `LC_ALL=C` leyendo los conflictos del texto (`parseConflicts`), sin tocar el checkout salvo con `allowConflicts`. Correcciones de Claude: el bloque apply/reintento estaba copiado tres veces (→ `gitApply`) y el hash dos (→ `patchSha256`); con `allowConflicts`, `git apply --3way` sale ≠ 0 tras escribir los marcadores y se devolvía `applied: false` con el checkout ya modificado — ahora `applied: true` con `conflicts`, conservando el worktree. Fuera de los `Files`: `jobs.ts` — `persist` escribía la copia tomada al llamar y el lock no respeta el orden, así que una escritura vieja podía pisar `verifying`/`detail` (test intermitente de T5); ahora escribe el estado vigente. agy también cambió `realOrResolved` (resuelve el ancestro existente para rutas que no existen, usado por `NOT_FOUND`) y actualizó skill, agentes y comandos. Gates: typecheck 0 errores, 367 passed dos veces seguidas, plugin validate ok, plugin test 12 pass. Clean-code: las dos deduplicaciones de arriba · close calls: un `delegation_apply` con conflictos y `allowConflicts` deja el worktree para inspección; `delegation_discard` lo borra
 
 ## T7 — Card, doctor y documentación
 

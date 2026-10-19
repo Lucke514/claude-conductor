@@ -46,7 +46,17 @@ export interface ReservationAuditEntry {
   sdd: { slug: string; taskId: string };
 }
 
-export async function appendAudit(entry: AuditEntry | LifecycleAuditEntry | ReservationAuditEntry, dir = logsDir()): Promise<void> {
+/** A `delegation_apply` refused because the worktree diff changed (R5, R8). */
+export interface PatchChangedAuditEntry {
+  type: "PATCH_CHANGED";
+  id: string;
+  ts: string;
+}
+
+export async function appendAudit(
+  entry: AuditEntry | LifecycleAuditEntry | ReservationAuditEntry | PatchChangedAuditEntry,
+  dir = logsDir(),
+): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
   await fs.appendFile(path.join(dir, `${today()}.jsonl`), `${JSON.stringify(entry)}\n`, { encoding: "utf8", mode: 0o600 });
 }
