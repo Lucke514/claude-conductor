@@ -9,5 +9,14 @@
       "mcp__plugin_multi-provider_multi-provider__providers_config",
       "mcp__plugin_multi-provider_multi-provider__delegation_status"
     ]
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node \"/Users/lucasgonzalez/.claude/multi-provider/statusline.js\""
   }
 }
